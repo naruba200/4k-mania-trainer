@@ -32,13 +32,13 @@ export const RATE_MODS = {
 
 export const DEFAULT_KEY_BINDS = ['d', 'f', 'j', 'k'];
 
-// Grade thresholds (accuracy %) — SS needs a perfect run.
+// Grade thresholds (accuracy %) — osu!mania style bands.
 export const GRADES = [
   { name: 'SS', min: 100, color: '#ffd166' },
-  { name: 'S', min: 98, color: '#4ecdc4' },
-  { name: 'A', min: 94, color: '#80ed99' },
-  { name: 'B', min: 90, color: '#ffe66d' },
-  { name: 'C', min: 80, color: '#ff9f43' },
+  { name: 'S', min: 95, color: '#4ecdc4' },
+  { name: 'A', min: 90, color: '#80ed99' },
+  { name: 'B', min: 80, color: '#ffe66d' },
+  { name: 'C', min: 70, color: '#ff9f43' },
   { name: 'D', min: 0, color: '#ff6b6b' },
 ];
 

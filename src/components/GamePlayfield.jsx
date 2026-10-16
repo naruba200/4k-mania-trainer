@@ -4,6 +4,7 @@ import { useKeyboardListener } from '../hooks/useKeyboardListener';
 import {
   calculateHitJudgement,
   generatePattern,
+  calculateAccuracy,
   calculateTimingStats,
   effectiveBpm,
   effectiveDuration,
@@ -386,11 +387,7 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
           );
         }
       }
-      const total = Object.values(jud).reduce((a, b) => a + b, 0);
-      accRef.current =
-        total > 0
-          ? ((jud.MARVELOUS || 0) + (jud.PERFECT || 0)) / total * 100
-          : 100;
+      accRef.current = calculateAccuracy(jud);
       accTimelineRef.current.push({
         t: Math.round(currentTime),
         acc: Math.round(accRef.current * 100) / 100,
