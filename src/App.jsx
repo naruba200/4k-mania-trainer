@@ -68,13 +68,15 @@ const App = () => {
 
         <div className="game-container">
           {gameState === 'playing' && (
-            <Playfield
-              key={runId}
-              settings={settings}
-              onGameEnd={handleGameEnd}
-              onRestart={handleRetry}
-              onQuit={handleQuitToDashboard}
-            />
+            <div className="track-stage">
+              <Playfield
+                key={runId}
+                settings={settings}
+                onGameEnd={handleGameEnd}
+                onRestart={handleRetry}
+                onQuit={handleQuitToDashboard}
+              />
+            </div>
           )}
           {gameState === 'results' && results && (
             <ResultsScreen
