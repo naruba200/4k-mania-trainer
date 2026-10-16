@@ -4,40 +4,69 @@ import { useKeyboardListener } from '../hooks/useKeyboardListener';
 import {
   calculateHitJudgement,
   generatePattern,
-  calculateAccuracy,
   calculateTimingStats,
   effectiveBpm,
+  effectiveDuration,
+  gradeForAccuracy,
+  judgementColor,
+  skinColors,
+  simulateNotes,
   MAX_HIT_WINDOW,
 } from '../utils';
-import { JUDGEMENTS } from '../types';
+import { JUDGEMENTS, SIGNATURES } from '../types';
+import { getCharts } from '../storage';
 import { Pause, Play, RotateCcw, Home } from 'lucide-react';
 
 // Notes are positioned purely from the music clock:
-//   y = receptorY - (note.time - now) * pxPerMs
+//   y = receptorY ∓ (note.time - now) * pxPerMs   (downscroll / upscroll)
 // so what you see is exactly what the judgement measures. No drift, ever.
 const COUNTDOWN_MS = 3000;
 
+const hitFreq = {
+  MARVELOUS: 1320,
+  PERFECT: 1174,
+  GREAT: 1046,
+  GOOD: 880,
+  BAD: 740,
+};
+
 const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
   const canvasRef = useRef();
-  const { isKeyPressed, consumePresses, pressKey, releaseKey } =
+  const { isKeyPressed, consumePresses, consumeReleases, pressKey, releaseKey } =
     useKeyboardListener(settings.keyBinds);
 
   const notesRef = useRef([]);
   const judgementsRef = useRef({});
+  const judgedRef = useRef(0);
   const errorsRef = useRef([]); // signed hit errors in ms (negative = early)
   const errSumRef = useRef(0);
   const errCountRef = useRef(0);
   const comboRef = useRef(0);
   const maxComboRef = useRef(0);
   const scoreRef = useRef(0);
+  const accRef = useRef(100);
+  const healthRef = useRef(100);
+  const failedRef = useRef(false);
+  const loopsRef = useRef(0);
   const totalUnitsRef = useRef(0);
+  const laneRef = useRef([
+    { hit: 0, total: 0 },
+    { hit: 0, total: 0 },
+    { hit: 0, total: 0 },
+    { hit: 0, total: 0 },
+  ]);
+  const accTimelineRef = useRef([]);
   const startTimeRef = useRef(0);
+  const durationRef = useRef(30);
   const gameOverRef = useRef(false);
   const lastJudgementRef = useRef(null);
-  const ringsRef = useRef([]); // hit ring effects { at, column }
+  const ringsRef = useRef([]);
+  const ghostRef = useRef(null);
   const pausedRef = useRef(false);
   const pauseStartedAtRef = useRef(0);
   const touchMapRef = useRef(new Map());
+  const replayRef = useRef(null);
+  const bgmRef = useRef(null);
   const [paused, setPaused] = useState(false);
 
   // Metronome state
@@ -59,6 +88,11 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
   const setPausedState = useCallback((p) => {
     pausedRef.current = p;
     setPaused(p);
+    const bgm = bgmRef.current;
+    if (bgm) {
+      if (p) bgm.pause();
+      else bgm.play().catch(() => {});
+    }
   }, []);
 
   const togglePause = useCallback(() => {
@@ -71,9 +105,10 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       // resumes exactly where it froze.
       startTimeRef.current += Date.now() - pauseStartedAtRef.current;
       consumePresses(); // discard presses made while paused
+      consumeReleases();
       setPausedState(false);
     }
-  }, [consumePresses, setPausedState]);
+  }, [consumePresses, consumeReleases, setPausedState]);
 
   // Esc toggles pause.
   useEffect(() => {
@@ -106,27 +141,48 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     return audioRef.current;
   };
 
-  const click = (accent) => {
+  const click = (accent, freq = null, vol = 0.12, dur = 0.07) => {
     const actx = ensureAudio();
     if (!actx) return;
     const t = actx.currentTime;
     const osc = actx.createOscillator();
     const gain = actx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = accent ? 880 : 660;
-    gain.gain.setValueAtTime(0.12, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    osc.type = freq ? 'triangle' : 'sine';
+    osc.frequency.value = freq || (accent ? 880 : 660);
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
     osc.connect(gain);
     gain.connect(actx.destination);
     osc.start(t);
-    osc.stop(t + 0.08);
+    osc.stop(t + dur + 0.01);
   };
 
-  useEffect(() => {
-    // Expand chords into per-column notes so every note is judged and drawn
-    // individually, then sort by time for the matching/culling loops.
+  const hitsound = (judgement) => {
+    if (!settingsRef.current.hitsound) return;
+    const vol = 0.09 * (settingsRef.current.hitsoundVolume ?? 0.5) * 2;
+    click(false, hitFreq[judgement] || 660, Math.min(0.2, vol), 0.05);
+  };
+
+  // Build note instances from settings (pattern, mixer, section, or chart).
+  const buildNotes = (st) => {
+    let raw;
+    let duration;
+    if (st.chartId) {
+      const chart = getCharts().find((c) => c.id === st.chartId);
+      raw = (chart?.notes || []).map((n) => ({
+        time: n.t,
+        column: n.c,
+        hold: n.h || null,
+        type: 'custom',
+      }));
+      const maxT = raw.reduce((m, n) => Math.max(m, n.time + (n.hold || 0)), 0);
+      duration = maxT / 1000 + 2;
+    } else {
+      raw = generatePattern(st);
+      duration = effectiveDuration(st);
+    }
     const instances = [];
-    for (const note of generatePattern(settings)) {
+    for (const note of raw) {
       const cols = Array.isArray(note.column) ? note.column : [note.column];
       for (const column of cols) {
         instances.push({
@@ -142,27 +198,77 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       }
     }
     instances.sort((a, b) => a.time - b.time);
+    return { instances, duration };
+  };
 
+  const resetRunState = (keepStats) => {
+    const st = settingsRef.current;
+    const { instances, duration } = buildNotes(st);
     notesRef.current = instances;
-    judgementsRef.current = {};
-    errorsRef.current = [];
-    errSumRef.current = 0;
-    errCountRef.current = 0;
-    comboRef.current = 0;
-    maxComboRef.current = 0;
-    scoreRef.current = 0;
-    totalUnitsRef.current =
+    durationRef.current = duration;
+    if (!keepStats) {
+      judgementsRef.current = {};
+      judgedRef.current = 0;
+      errorsRef.current = [];
+      errSumRef.current = 0;
+      errCountRef.current = 0;
+      comboRef.current = 0;
+      maxComboRef.current = 0;
+      scoreRef.current = 0;
+      accRef.current = 100;
+      healthRef.current = 100;
+      failedRef.current = false;
+      loopsRef.current = 0;
+      totalUnitsRef.current = 0;
+      laneRef.current = [
+        { hit: 0, total: 0 },
+        { hit: 0, total: 0 },
+        { hit: 0, total: 0 },
+        { hit: 0, total: 0 },
+      ];
+      accTimelineRef.current = [];
+      replayRef.current = {
+        settings: { ...st },
+        inputs: [],
+      };
+    }
+    totalUnitsRef.current +=
       instances.length + instances.filter((n) => n.tail).length;
     lastJudgementRef.current = null;
     ringsRef.current = [];
     gameOverRef.current = false;
     nextBeatRef.current = 0;
     beatCountRef.current = 0;
-    msPerBeatRef.current = 60000 / effectiveBpm(settings);
+    msPerBeatRef.current = 60000 / effectiveBpm(st);
     lastBeatWallRef.current = 0;
     // Countdown: the clock starts negative so notes roll in on "go".
     startTimeRef.current = Date.now() + COUNTDOWN_MS;
     setPausedState(false);
+  };
+
+  useEffect(() => {
+    const st = settingsRef.current;
+    resetRunState(false);
+    // Ghost target for this chart (deterministic bot).
+    ghostRef.current = st.ghost
+      ? simulateNotes(
+          notesRef.current.map((n) => ({
+            time: n.time,
+            column: n.column,
+            hold: n.tail ? n.tail - n.time : null,
+          })),
+          st,
+          st.ghost
+        ).score
+      : null;
+    // Background music (session object URL, not persisted).
+    if (st.bgMusicUrl) {
+      const audio = new Audio(st.bgMusicUrl);
+      audio.loop = true;
+      audio.volume = 0.4;
+      bgmRef.current = audio;
+      audio.play().catch(() => {});
+    }
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -172,8 +278,43 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     };
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
-    return () => window.removeEventListener('resize', resizeCanvas);
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      if (bgmRef.current) {
+        bgmRef.current.pause();
+        bgmRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, setPausedState]);
+
+  const finishRun = (failed) => {
+    gameOverRef.current = true;
+    failedRef.current = failed;
+    if (bgmRef.current) bgmRef.current.pause();
+    const jud = judgementsRef.current;
+    const total = Object.values(jud).reduce((a, b) => a + b, 0);
+    const grade = gradeForAccuracy(accRef.current);
+    onGameEndRef.current({
+      score: scoreRef.current,
+      accuracy: accRef.current,
+      maxCombo: maxComboRef.current,
+      judgements: jud,
+      timing: calculateTimingStats(errorsRef.current),
+      errors: errorsRef.current,
+      totalNotes: totalUnitsRef.current,
+      judgedTotal: total,
+      failed,
+      loops: loopsRef.current,
+      laneStats: laneRef.current,
+      accTimeline: accTimelineRef.current,
+      replay: replayRef.current,
+      grade: grade.name,
+      gradeColor: grade.color,
+      isFullCombo:
+        totalUnitsRef.current > 0 && maxComboRef.current >= totalUnitsRef.current,
+    });
+  };
 
   // Touch input: each touch maps to a lane column.
   const columnFromTouch = (touch) => {
@@ -211,26 +352,66 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     const ctx = canvas.getContext('2d');
     const settings = settingsRef.current;
     const keys = settings.keyBinds.map((k) => (k || '').toLowerCase());
+    const skin = skinColors(settings.skin);
+    const cb = !!settings.colorblind;
+    const reduceMotion = !!settings.reduceMotion;
+    const up = !!settings.upscroll;
     const { width, height } = canvas;
-    const receptorY = height - 50;
+    const receptorY = up ? 50 : height - 50;
     const pxPerMs = 0.5 * settings.scrollSpeed;
+    const yFor = (t, now) =>
+      up ? receptorY + (t - now) * pxPerMs : receptorY - (t - now) * pxPerMs;
     const currentTime = Date.now() - startTimeRef.current;
     const wallNow = Date.now();
+    const failMode = !!settings.failMode;
 
-    const awardHit = (judgement) => {
-      scoreRef.current += JUDGEMENTS[judgement].points;
-      comboRef.current += 1;
-      maxComboRef.current = Math.max(maxComboRef.current, comboRef.current);
-      judgementsRef.current[judgement] =
-        (judgementsRef.current[judgement] || 0) + 1;
+    const registerJudgement = (j) => {
+      judgedRef.current++;
+      const jud = judgementsRef.current;
+      if (j === 'MISS') {
+        jud.MISS = (jud.MISS || 0) + 1;
+        comboRef.current = 0;
+        if (failMode) healthRef.current = Math.max(0, healthRef.current - 8);
+      } else {
+        scoreRef.current += JUDGEMENTS[j].points;
+        comboRef.current++;
+        maxComboRef.current = Math.max(maxComboRef.current, comboRef.current);
+        jud[j] = (jud[j] || 0) + 1;
+        if (failMode) {
+          const gain =
+            { MARVELOUS: 3, PERFECT: 2, GREAT: 1, GOOD: 0, BAD: -4 }[j] ?? 0;
+          healthRef.current = Math.min(
+            100,
+            Math.max(0, healthRef.current + gain)
+          );
+        }
+      }
+      const total = Object.values(jud).reduce((a, b) => a + b, 0);
+      accRef.current =
+        total > 0
+          ? ((jud.MARVELOUS || 0) + (jud.PERFECT || 0)) / total * 100
+          : 100;
+      accTimelineRef.current.push({
+        t: Math.round(currentTime),
+        acc: Math.round(accRef.current * 100) / 100,
+      });
+      if (accTimelineRef.current.length > 4000) {
+        accTimelineRef.current = accTimelineRef.current.filter(
+          (_, i) => i % 2 === 0
+        );
+      }
+      if (failMode && healthRef.current <= 0 && !failedRef.current) {
+        finishRun(true);
+      }
     };
 
     // --- metronome: steady click at the effective BPM ---
     if (settings.metronome) {
+      const sig = SIGNATURES[settings.signature] ?? 4;
       while (nextBeatRef.current <= currentTime) {
         const b = nextBeatRef.current;
         if (b >= 0) {
-          click(beatCountRef.current % 4 === 0);
+          click(beatCountRef.current % sig === 0);
           lastBeatWallRef.current = wallNow;
         }
         nextBeatRef.current += msPerBeatRef.current;
@@ -241,6 +422,11 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     // --- input: match each discrete keydown to the nearest unhit note ---
     for (const press of consumePresses()) {
       const pressTime = press.time - startTimeRef.current;
+      replayRef.current.inputs.push({
+        k: press.key,
+        t: Math.round(pressTime),
+        d: 1,
+      });
       const column = keys.indexOf(press.key);
       if (column === -1) continue;
 
@@ -265,10 +451,29 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
         errorsRef.current.push(err);
         errSumRef.current += err;
         errCountRef.current += 1;
-        awardHit(judgement);
+        laneRef.current[column].total++;
+        laneRef.current[column].hit++;
+        registerJudgement(judgement);
+        hitsound(judgement);
         lastJudgementRef.current = { name: judgement, at: wallNow };
-        ringsRef.current.push({ at: wallNow, column: best.column });
+        if (!reduceMotion)
+          ringsRef.current.push({ at: wallNow, column: best.column });
       }
+    }
+
+    // --- releases: true tail timing for hold notes ---
+    const relMap = new Map();
+    for (const rel of consumeReleases()) {
+      const relTime = rel.time - startTimeRef.current;
+      replayRef.current.inputs.push({
+        k: rel.key,
+        t: Math.round(relTime),
+        d: 0,
+      });
+      if (!relMap.has(rel.key)) relMap.set(rel.key, relTime);
+    }
+    if (replayRef.current.inputs.length > 30000) {
+      replayRef.current.inputs = replayRef.current.inputs.slice(-30000);
     }
 
     // --- misses: unhit notes past the widest window ---
@@ -276,54 +481,59 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       if (note.hit === undefined && currentTime - note.time > MAX_HIT_WINDOW) {
         note.hit = false;
         note.hitAt = wallNow;
-        judgementsRef.current.MISS = (judgementsRef.current.MISS || 0) + 1;
-        comboRef.current = 0;
+        laneRef.current[note.column].total++;
+        registerJudgement('MISS');
+        if (gameOverRef.current) return; // failed out
       }
     }
 
-    // --- hold tails: keep holding or the tail breaks ---
+    // --- hold tails ---
     for (const note of notesRef.current) {
-      if (!note.tail || note.hit !== true || note.tailHit !== undefined) continue;
-      const held = isKeyPressed(keys[note.column]);
-      if (!held) {
-        if (currentTime < note.tail - MAX_HIT_WINDOW) {
-          // Released too early — tail missed, combo breaks.
-          note.tailHit = false;
-          note.tailAt = wallNow;
-          judgementsRef.current.MISS = (judgementsRef.current.MISS || 0) + 1;
-          comboRef.current = 0;
-        } else {
-          // Released inside the tail window — counts as held through.
-          note.tailHit = true;
-          note.tailAt = wallNow;
-          awardHit(note.judgement);
-        }
-      } else if (currentTime >= note.tail) {
-        // Held all the way through.
+      if (!note.tail || note.hit !== true || note.tailHit !== undefined)
+        continue;
+      const key = keys[note.column];
+      const relT = relMap.get(key);
+      const held = isKeyPressed(key);
+      if (relT !== undefined) {
+        // Released: judge the release timing against the tail.
+        const judgement = calculateHitJudgement(relT - note.tail);
+        note.tailHit = judgement !== 'MISS';
+        note.tailAt = wallNow;
+        registerJudgement(judgement);
+        if (note.tailHit) hitsound(judgement);
+        if (gameOverRef.current) return;
+      } else if (!held) {
+        // Key is up with no release on record (e.g. released during pause):
+        // treat as an early release.
+        note.tailHit = false;
+        note.tailAt = wallNow;
+        registerJudgement('MISS');
+        if (gameOverRef.current) return;
+      } else if (currentTime >= note.tail + MAX_HIT_WINDOW) {
+        // Held clean through the tail window.
         note.tailHit = true;
         note.tailAt = wallNow;
-        awardHit(note.judgement);
+        registerJudgement('PERFECT');
+        hitsound('PERFECT');
       }
     }
 
-    // --- game over ---
-    if (currentTime >= settings.duration * 1000) {
-      gameOverRef.current = true;
-      onGameEndRef.current({
-        score: scoreRef.current,
-        accuracy: calculateAccuracy(judgementsRef.current),
-        maxCombo: maxComboRef.current,
-        judgements: judgementsRef.current,
-        timing: calculateTimingStats(errorsRef.current),
-        totalNotes: totalUnitsRef.current,
-      });
+    // --- game over / section loop ---
+    if (currentTime >= durationRef.current * 1000) {
+      if (settings.loopSection && !failedRef.current) {
+        loopsRef.current++;
+        resetRunState(true); // keep accumulated stats, fresh notes
+        return;
+      }
+      finishRun(false);
       return;
     }
 
     // --- cull notes long past (array stays time-sorted) ---
     while (
       notesRef.current.length > 0 &&
-      currentTime - Math.max(notesRef.current[0].time, notesRef.current[0].tail || 0) >
+      currentTime -
+        Math.max(notesRef.current[0].time, notesRef.current[0].tail || 0) >
         1500
     ) {
       notesRef.current.shift();
@@ -338,24 +548,21 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
 
       // Hold body
       if (note.tail) {
-        const yTail = receptorY - (note.tail - currentTime) * pxPerMs;
+        const yTail = yFor(note.tail, currentTime);
         const yHeadNow =
-          note.hit === true
-            ? receptorY
-            : receptorY - (note.time - currentTime) * pxPerMs;
+          note.hit === true ? receptorY : yFor(note.time, currentTime);
         const top = Math.min(yHeadNow, yTail);
         const h = Math.abs(yHeadNow - yTail);
-        const fading =
-          note.tailHit === true && wallNow - note.tailAt > 200;
+        const fading = note.tailHit === true && wallNow - note.tailAt > 200;
         if (!fading && top < height + 40 && top + h > -60) {
-          let bodyColor = '#cfcfcf';
+          let bodyColor = skin.hold;
           if (note.hit === true) {
             if (note.tailHit === false) bodyColor = '#ff6b6b';
             else if (note.tailHit === true)
-              bodyColor = JUDGEMENTS[note.judgement]?.color || '#4ecdc4';
+              bodyColor = judgementColor(note.judgement, cb);
             else
               bodyColor = isKeyPressed(keys[note.column])
-                ? JUDGEMENTS[note.judgement]?.color || '#4ecdc4'
+                ? judgementColor(note.judgement, cb)
                 : '#8888aa';
           } else if (note.hit === false) {
             bodyColor = '#ff6b6b';
@@ -365,7 +572,7 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
               ? Math.max(0, 1 - (wallNow - note.tailAt) / 200)
               : 1;
           ctx.fillStyle = bodyColor;
-          ctx.fillRect(x - 18, top, 36, h);
+          ctx.fillRect(x - 18, top, h);
           ctx.globalAlpha = 1;
         }
       }
@@ -382,41 +589,42 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
           alpha = 1 - age / 150;
         }
       } else {
-        y = receptorY - (note.time - currentTime) * pxPerMs;
+        y = yFor(note.time, currentTime);
         if (y < -60 || y > height + 40) drawHead = false;
       }
       if (drawHead) {
         ctx.globalAlpha = alpha;
         ctx.fillStyle =
           note.hit === true
-            ? JUDGEMENTS[note.judgement]?.color || '#4ecdc4'
+            ? judgementColor(note.judgement, cb)
             : note.hit === false
               ? '#ff6b6b'
-              : '#ffffff';
+              : skin.note;
         ctx.fillRect(x - 25, y - 12, 50, 24);
         ctx.globalAlpha = 1;
       }
     }
 
     // Hit rings
-    ringsRef.current = ringsRef.current.filter(
-      (r) => wallNow - r.at < 300
-    );
-    for (const r of ringsRef.current) {
-      const age = wallNow - r.at;
-      const x = r.column * columnWidth + columnWidth / 2;
-      ctx.globalAlpha = 1 - age / 300;
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(x, receptorY, 14 + age * 0.12, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+    if (!reduceMotion) {
+      ringsRef.current = ringsRef.current.filter((r) => wallNow - r.at < 300);
+      for (const r of ringsRef.current) {
+        const age = wallNow - r.at;
+        const x = r.column * columnWidth + columnWidth / 2;
+        ctx.globalAlpha = 1 - age / 300;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, receptorY, 14 + age * 0.12, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     }
 
     // Receptor line (pulses on the metronome beat)
     const beatAge = wallNow - lastBeatWallRef.current;
-    const pulse = settings.metronome && beatAge < 150 ? 1 - beatAge / 150 : 0;
+    const pulse =
+      settings.metronome && !reduceMotion && beatAge < 150 ? 1 - beatAge / 150 : 0;
     ctx.strokeStyle = `rgba(140, 140, 220, ${0.45 + pulse * 0.55})`;
     ctx.lineWidth = 2 + pulse * 3;
     ctx.beginPath();
@@ -428,7 +636,7 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     for (let i = 0; i < 4; i++) {
       const x = i * columnWidth + columnWidth / 2;
       const pressed = isKeyPressed(keys[i]);
-      ctx.fillStyle = pressed ? '#8b8bc7' : '#3a3a4a';
+      ctx.fillStyle = pressed ? skin.receptorHeld : skin.receptor;
       ctx.strokeStyle = '#8888aa';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -437,12 +645,31 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       ctx.stroke();
     }
 
+    // Health bar (fail mode)
+    if (failMode) {
+      const bw = Math.min(240, width - 40);
+      const bx = (width - bw) / 2;
+      const by = up ? height - 24 : 12;
+      ctx.fillStyle = '#22222e';
+      ctx.fillRect(bx, by, bw, 10);
+      ctx.fillStyle =
+        healthRef.current > 50
+          ? '#4ecdc4'
+          : healthRef.current > 25
+            ? '#ffe66d'
+            : '#ff6b6b';
+      ctx.fillRect(bx, by, bw * (healthRef.current / 100), 10);
+    }
+
     // HUD
+    const grade = gradeForAccuracy(accRef.current);
     ctx.fillStyle = '#fff';
     ctx.font = '20px monospace';
     ctx.textAlign = 'left';
     ctx.fillText(`Score: ${scoreRef.current}`, 20, 30);
     ctx.fillText(`Combo: ${comboRef.current}`, 20, 58);
+    ctx.fillStyle = grade.color;
+    ctx.fillText(`Acc: ${accRef.current.toFixed(2)}%  [${grade.name}]`, 20, 86);
     if (errCountRef.current > 0) {
       const avg = errSumRef.current / errCountRef.current;
       ctx.fillStyle = '#aaa';
@@ -450,8 +677,28 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       ctx.fillText(
         `Avg err: ${avg >= 0 ? '+' : ''}${avg.toFixed(1)}ms`,
         20,
-        84
+        110
       );
+    }
+
+    // Ghost rival HUD
+    if (ghostRef.current != null && loopsRef.current === 0) {
+      const delta = scoreRef.current - ghostRef.current;
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#aaa';
+      ctx.font = '16px monospace';
+      ctx.fillText(
+        `Ghost: ${ghostRef.current.toLocaleString()}`,
+        width - 20,
+        30
+      );
+      ctx.fillStyle = delta >= 0 ? '#4ecdc4' : '#ff6b6b';
+      ctx.fillText(
+        `${delta >= 0 ? '+' : ''}${delta.toLocaleString()}`,
+        width - 20,
+        52
+      );
+      ctx.textAlign = 'left';
     }
 
     // Countdown
@@ -459,21 +706,28 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 72px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(String(Math.ceil(-currentTime / 1000)), width / 2, height / 2);
+      ctx.fillText(
+        String(Math.ceil(-currentTime / 1000)),
+        width / 2,
+        height / 2
+      );
       ctx.textAlign = 'left';
     }
 
     // Last judgement popup
     const lj = lastJudgementRef.current;
     if (lj && wallNow - lj.at < 700) {
-      const j = JUDGEMENTS[lj.name];
-      ctx.fillStyle = j.color;
+      ctx.fillStyle = judgementColor(lj.name, cb);
       ctx.font = 'bold 28px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(j.name.toUpperCase(), width / 2, 90);
+      ctx.fillText(lj.name.toUpperCase(), width / 2, up ? height - 90 : 120);
       ctx.textAlign = 'left';
     }
   }, [settings]);
+
+  const loopActive =
+    settings.loopSection &&
+    (settings.sectionStart != null || settings.sectionEnd != null);
 
   return (
     <div
@@ -486,6 +740,9 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       <button className="pause-btn" onClick={togglePause} aria-label="Pause">
         {paused ? <Play size={18} /> : <Pause size={18} />}
       </button>
+      {loopsRef.current > 0 && !paused && (
+        <div className="loop-badge">Loop {loopsRef.current + 1}</div>
+      )}
       {paused && (
         <div className="pause-overlay">
           <h2 className="text-2xl font-bold mb-4">Paused</h2>
@@ -496,8 +753,9 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
             <button onClick={onRestart}>
               <RotateCcw size={16} /> Restart
             </button>
-            <button onClick={onQuit}>
-              <Home size={16} /> Quit to dashboard
+            <button onClick={loopActive ? () => finishRun(false) : onQuit}>
+              <Home size={16} />{' '}
+              {loopActive ? 'Finish & results' : 'Quit to dashboard'}
             </button>
           </div>
         </div>
