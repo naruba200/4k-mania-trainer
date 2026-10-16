@@ -112,6 +112,21 @@ export const generatePattern = (settings) => {
     [1, 3],
   ];
 
+  // Pattern state for the musical (non-robotic) variations below.
+  // Everything runs off the seeded RNG, so a seed always replays the same chart.
+  let prevCol = -1;
+  let jackCol = Math.floor(rand() * 4);
+  let jackPos = 0;
+  let jackLen = 1 + Math.floor(rand() * Math.max(1, jackLength));
+  const TRILL_PAIRS = [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+  ];
+  let trillPair = TRILL_PAIRS[Math.floor(rand() * TRILL_PAIRS.length)];
+  let stairPos = 0;
+  let stairDir = 1;
+
   // Generate notes based on pattern type
   let time = 0;
   for (let i = 0; i < noteCount; i++) {
@@ -119,32 +134,74 @@ export const generatePattern = (settings) => {
 
     let column;
     switch (patternType) {
-      case 'streams':
-        column = i % 4;
+      case 'streams': {
+        // Mostly free single notes, with occasional mini-jacks and jumps.
+        const r = rand();
+        if (r < 0.12 && prevCol >= 0) {
+          column = prevCol;
+        } else if (r < 0.24) {
+          column = CHORD_SHAPES[Math.floor(rand() * CHORD_SHAPES.length)];
+        } else {
+          column = Math.floor(rand() * 4);
+        }
         break;
-      case 'jacks':
-        column = Math.floor(i / jackLength) % 4;
+      }
+      case 'jacks': {
+        // Random jack lengths (1..jackLength) on random columns.
+        if (jackPos >= jackLen) {
+          jackPos = 0;
+          jackCol = Math.floor(rand() * 4);
+          jackLen = 1 + Math.floor(rand() * Math.max(1, jackLength));
+        }
+        column = jackCol;
+        jackPos++;
         break;
+      }
       case 'jumps':
-        column = i % 2 === 0 ? 0 : 3;
-        break;
-      case 'chords':
         column = CHORD_SHAPES[Math.floor(rand() * CHORD_SHAPES.length)];
         break;
-      case 'speed':
-        column = i % 4;
+      case 'chords':
+        // Mostly chords, with single-note fills sprinkled in.
+        column =
+          rand() < 0.75
+            ? CHORD_SHAPES[Math.floor(rand() * CHORD_SHAPES.length)]
+            : Math.floor(rand() * 4);
         break;
-      case 'trill':
-        column = i % 2; // two-column trill
+      case 'speed': {
+        const r = rand();
+        column =
+          r < 0.1
+            ? CHORD_SHAPES[Math.floor(rand() * CHORD_SHAPES.length)]
+            : i % 4;
         break;
+      }
+      case 'trill': {
+        // Two-finger trill; the pair wanders to neighboring lanes sometimes.
+        if (i > 0 && rand() < 0.15) {
+          trillPair = TRILL_PAIRS[Math.floor(rand() * TRILL_PAIRS.length)];
+        }
+        column = trillPair[i % 2];
+        break;
+      }
       case 'staircase': {
-        const p = i % 6;
-        column = p < 4 ? p : 6 - p; // 0,1,2,3,2,1
+        // Walk up/down the lanes, sometimes turning before the edge.
+        if (rand() < 0.18) stairDir *= -1;
+        stairPos += stairDir;
+        if (stairPos > 3) {
+          stairPos = 3;
+          stairDir = -1;
+        } else if (stairPos < 0) {
+          stairPos = 0;
+          stairDir = 1;
+        }
+        column = stairPos;
         break;
       }
       default:
         column = Math.floor(rand() * 4);
     }
+
+    prevCol = Array.isArray(column) ? column[column.length - 1] : column;
 
     // Hold notes: 2 beats long, decided by the seeded RNG.
     const hold =

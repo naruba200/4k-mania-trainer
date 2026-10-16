@@ -79,7 +79,7 @@ const Dashboard = ({ onStartGame }) => {
         </div>
       )}
 
-      <div className="settings-grid grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="settings-grid grid grid-cols-1 gap-4">
         <div className="setting-group">
           <label className="block text-sm font-medium mb-1 text-white">
             Pattern Type
@@ -311,7 +311,7 @@ const Dashboard = ({ onStartGame }) => {
           </label>
         </div>
 
-        <div className="setting-group col-span-1 md:col-span-2">
+        <div className="setting-group">
           <label className="block text-sm font-medium mb-1 text-white">
             Key Binds
           </label>
