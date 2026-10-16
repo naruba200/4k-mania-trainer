@@ -10,9 +10,9 @@ export const useKeyboardListener = (keyBinds) => {
     bindsRef.current = keyBinds.map((k) => (k || '').toLowerCase());
   });
 
-  const onKeyDown = useCallback((e) => {
-    if (e.repeat) return;
-    const key = (e.key || '').toLowerCase();
+  // Programmatic press/release — shared by keyboard events and touch input.
+  const pressKey = useCallback((rawKey) => {
+    const key = (rawKey || '').toLowerCase();
     if (!bindsRef.current.includes(key)) return;
     if (!keyStates.current.get(key)) {
       keyStates.current.set(key, true);
@@ -20,11 +20,26 @@ export const useKeyboardListener = (keyBinds) => {
     }
   }, []);
 
-  const onKeyUp = useCallback((e) => {
-    const key = (e.key || '').toLowerCase();
+  const releaseKey = useCallback((rawKey) => {
+    const key = (rawKey || '').toLowerCase();
     if (!bindsRef.current.includes(key)) return;
     keyStates.current.set(key, false);
   }, []);
+
+  const onKeyDown = useCallback(
+    (e) => {
+      if (e.repeat) return;
+      pressKey(e.key);
+    },
+    [pressKey]
+  );
+
+  const onKeyUp = useCallback(
+    (e) => {
+      releaseKey(e.key);
+    },
+    [releaseKey]
+  );
 
   useEffect(() => {
     window.addEventListener('keydown', onKeyDown);
@@ -47,5 +62,5 @@ export const useKeyboardListener = (keyBinds) => {
     return presses;
   }, []);
 
-  return { isKeyPressed, consumePresses };
+  return { isKeyPressed, consumePresses, pressKey, releaseKey };
 };
