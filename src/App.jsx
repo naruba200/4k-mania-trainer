@@ -3,99 +3,158 @@ import './App.css';
 import Dashboard from './components/Dashboard';
 import Playfield from './components/GamePlayfield';
 import ResultsScreen from './components/ResultsScreen';
+import ReplayViewer from './components/ReplayViewer';
 import { Music, Zap } from 'lucide-react';
 import { configKey } from './utils';
-import { trySavePB, logRun } from './storage';
+import {
+  getPB,
+  trySavePB,
+  logRun,
+  recordPlayDate,
+  getStreak,
+  getHistory,
+  unlockAchievement,
+  ACHIEVEMENT_DEFS,
+} from './storage';
+
+// A shared chart arrives as #s=<base64 json> — decode it into dashboard settings.
+const parseSharedSettings = () => {
+  const hash = window.location.hash;
+  if (!hash.startsWith('#s=')) return null;
+  try {
+    return JSON.parse(decodeURIComponent(escape(atob(hash.slice(3)))));
+  } catch {
+    return null;
+  }
+};
 
 const App = () => {
-  const [gameState, setGameState] = useState('dashboard');
+  const [screen, setScreen] = useState('dashboard'); // dashboard | playing | results
   const [settings, setSettings] = useState(null);
   const [results, setResults] = useState(null);
-  const [runId, setRunId] = useState(0);
+  const [isNewPb, setIsNewPb] = useState(false);
+  const [pbDelta, setPbDelta] = useState(0);
+  const [newAchievements, setNewAchievements] = useState([]);
+  const [replay, setReplay] = useState(null);
+  const [sharedSettings] = useState(parseSharedSettings);
 
   const handleStartGame = (gameSettings) => {
     setSettings(gameSettings);
-    setRunId((id) => id + 1);
-    setGameState('playing');
+    setResults(null);
+    setReplay(null);
+    setScreen('playing');
   };
 
-  const handleGameEnd = (runResults) => {
-    const key = configKey(settings);
-    const { isNewBest, pb } = trySavePB(key, runResults);
+  const handleGameEnd = (gameResults) => {
+    const unlocked = [];
+    const grant = (id) => {
+      if (unlockAchievement(id)) {
+        const def = ACHIEVEMENT_DEFS.find((a) => a.id === id);
+        if (def) unlocked.push(def);
+      }
+    };
+
+    recordPlayDate();
+    if (!gameResults.failed) {
+      if (gameResults.isFullCombo) grant('first-fc');
+      if (gameResults.accuracy >= 95) grant('acc-95');
+      if (gameResults.accuracy >= 98) grant('acc-98');
+      if (gameResults.score >= 50000) grant('score-50k');
+      if (gameResults.score >= 100000) grant('score-100k');
+      if (getStreak() >= 7) grant('streak-7');
+    }
+    if (getHistory().length + 1 >= 10) grant('runs-10');
+
+    // PBs only for generated charts (custom charts have their own identity).
+    let newPb = false;
+    let delta = 0;
+    if (!settings.chartId && !gameResults.failed) {
+      const key = configKey(settings);
+      const prev = getPB(key);
+      delta = gameResults.score - (prev?.score || 0);
+      newPb = trySavePB(key, {
+        score: gameResults.score,
+        accuracy: gameResults.accuracy,
+        maxCombo: gameResults.maxCombo,
+        date: Date.now(),
+      });
+    }
+
     logRun({
-      date: Date.now(),
-      key,
-      patternType: settings.patternType,
+      patternType: settings.chartId ? 'custom' : settings.patternType,
       bpm: settings.bpm,
-      score: runResults.score,
-      accuracy: runResults.accuracy,
-      maxCombo: runResults.maxCombo,
+      score: gameResults.score,
+      accuracy: gameResults.accuracy,
+      maxCombo: gameResults.maxCombo,
+      grade: gameResults.grade,
+      date: Date.now(),
     });
-    setResults({ ...runResults, key, isNewBest, pb });
-    setGameState('results');
+
+    setIsNewPb(newPb);
+    setPbDelta(delta);
+    setNewAchievements(unlocked);
+    setResults(gameResults);
+    setScreen('results');
   };
 
   const handleRetry = () => {
-    setRunId((id) => id + 1);
-    setGameState('playing');
+    setResults(null);
+    setReplay(null);
+    setScreen('playing');
   };
 
   const handleQuitToDashboard = () => {
+    setSettings(null);
     setResults(null);
-    setGameState('dashboard');
+    setReplay(null);
+    setScreen('dashboard');
   };
 
-  const keyLabel = settings
-    ? settings.keyBinds.map((k) => (k || '').toUpperCase()).join(' ')
-    : 'D F J K';
-
   return (
-    <div className="app-container">
-      <header className="header">
-        <h1 className="text-2xl font-bold flex items-center justify-center">
-          <Music className="mr-2" size={24} />
-          4K Mania Trainer
-          <Zap className="ml-2" size={24} />
-        </h1>
+    <div className="app">
+      <header className="app-header">
+        <Music size={28} className="text-mania-2" />
+        <h1 className="text-2xl font-bold">4K Mania Trainer</h1>
+        <Zap size={28} className="text-mania-2" />
       </header>
 
-      <div className="main-content">
-        {gameState === 'dashboard' && (
-          <div className="sidebar">
-            <Dashboard onStartGame={handleStartGame} />
+      <main className="app-main">
+        {screen === 'dashboard' && (
+          <Dashboard
+            onStartGame={handleStartGame}
+            initialSettings={sharedSettings}
+          />
+        )}
+
+        {screen === 'playing' && settings && (
+          <div className="track-stage">
+            <Playfield
+              key={JSON.stringify(settings)}
+              settings={settings}
+              onGameEnd={handleGameEnd}
+              onRestart={handleRetry}
+              onQuit={handleQuitToDashboard}
+            />
           </div>
         )}
 
-        <div className="game-container">
-          {gameState === 'playing' && (
-            <div className="track-stage">
-              <Playfield
-                key={runId}
-                settings={settings}
-                onGameEnd={handleGameEnd}
-                onRestart={handleRetry}
-                onQuit={handleQuitToDashboard}
-              />
-            </div>
-          )}
-          {gameState === 'results' && results && (
-            <ResultsScreen
-              results={results}
-              settings={settings}
-              onRetry={handleRetry}
-              onDashboard={handleQuitToDashboard}
-            />
-          )}
-        </div>
-      </div>
+        {screen === 'results' && results && (
+          <ResultsScreen
+            results={results}
+            settings={settings}
+            isNewPb={isNewPb}
+            pbDelta={pbDelta}
+            newAchievements={newAchievements}
+            onRetry={handleRetry}
+            onWatchReplay={() => setReplay(results.replay)}
+            onQuit={handleQuitToDashboard}
+          />
+        )}
+      </main>
 
-      <footer className="footer">
-        <p className="text-white">
-          {gameState === 'playing'
-            ? `Press ${keyLabel} to play · Esc to pause`
-            : `Press ${keyLabel} to play`}
-        </p>
-      </footer>
+      {replay && (
+        <ReplayViewer replay={replay} onClose={() => setReplay(null)} />
+      )}
     </div>
   );
 };

@@ -4,6 +4,7 @@ export const useKeyboardListener = (keyBinds) => {
   const bindsRef = useRef([]);
   const keyStates = useRef(new Map());
   const pressQueueRef = useRef([]);
+  const releaseQueueRef = useRef([]);
 
   // Keep the normalized binds fresh without writing refs during render.
   useEffect(() => {
@@ -23,7 +24,17 @@ export const useKeyboardListener = (keyBinds) => {
   const releaseKey = useCallback((rawKey) => {
     const key = (rawKey || '').toLowerCase();
     if (!bindsRef.current.includes(key)) return;
-    keyStates.current.set(key, false);
+    if (keyStates.current.get(key)) {
+      keyStates.current.set(key, false);
+      releaseQueueRef.current.push({ key, time: Date.now() });
+    }
+  }, []);
+
+  // Drain queued keyup events: { key, time }.
+  const consumeReleases = useCallback(() => {
+    const rels = releaseQueueRef.current;
+    releaseQueueRef.current = [];
+    return rels;
   }, []);
 
   const onKeyDown = useCallback(
@@ -62,5 +73,5 @@ export const useKeyboardListener = (keyBinds) => {
     return presses;
   }, []);
 
-  return { isKeyPressed, consumePresses, pressKey, releaseKey };
+  return { isKeyPressed, consumePresses, consumeReleases, pressKey, releaseKey };
 };
