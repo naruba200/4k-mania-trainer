@@ -1,10 +1,11 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 
 export const useGameLoop = (callback, dependencies = []) => {
   const requestRef = useRef();
   const previousTimeRef = useRef();
   const callbackRef = useRef(callback);
 
+  // Always call the latest callback without restarting the loop.
   callbackRef.current = callback;
 
   useEffect(() => {
@@ -21,5 +22,7 @@ export const useGameLoop = (callback, dependencies = []) => {
     return () => {
       cancelAnimationFrame(requestRef.current);
     };
-  }, [dependencies]);
+    // `dependencies` is the caller's dep array — spread semantics, not [array].
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, dependencies);
 };
