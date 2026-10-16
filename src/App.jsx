@@ -1,22 +1,40 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import './App.css';
 import Dashboard from './components/Dashboard';
 import Playfield from './components/GamePlayfield';
-import { Music, Zap, ArrowRight } from 'lucide-react';
+import ResultsScreen from './components/ResultsScreen';
+import { Music, Zap } from 'lucide-react';
 
 const App = () => {
   const [gameState, setGameState] = useState('dashboard');
   const [settings, setSettings] = useState(null);
+  const [results, setResults] = useState(null);
+  const [runId, setRunId] = useState(0);
 
   const handleStartGame = (gameSettings) => {
     setSettings(gameSettings);
+    setRunId((id) => id + 1);
     setGameState('playing');
   };
 
-  const handleGameEnd = (results) => {
-    console.log('Game ended:', results);
+  const handleGameEnd = (runResults) => {
+    setResults(runResults);
+    setGameState('results');
+  };
+
+  const handleRetry = () => {
+    setRunId((id) => id + 1);
+    setGameState('playing');
+  };
+
+  const handleQuitToDashboard = () => {
+    setResults(null);
     setGameState('dashboard');
   };
+
+  const keyLabel = settings
+    ? settings.keyBinds.map((k) => (k || '').toUpperCase()).join(' ')
+    : 'D F J K';
 
   return (
     <div className="app-container">
@@ -37,13 +55,31 @@ const App = () => {
 
         <div className="game-container">
           {gameState === 'playing' && (
-            <Playfield settings={settings} onGameEnd={handleGameEnd} />
+            <Playfield
+              key={runId}
+              settings={settings}
+              onGameEnd={handleGameEnd}
+              onRestart={handleRetry}
+              onQuit={handleQuitToDashboard}
+            />
+          )}
+          {gameState === 'results' && results && (
+            <ResultsScreen
+              results={results}
+              settings={settings}
+              onRetry={handleRetry}
+              onDashboard={handleQuitToDashboard}
+            />
           )}
         </div>
       </div>
 
       <footer className="footer">
-        <p className="text-white">Press D, F, J, K to play</p>
+        <p className="text-white">
+          {gameState === 'playing'
+            ? `Press ${keyLabel} to play · Esc to pause`
+            : `Press ${keyLabel} to play`}
+        </p>
       </footer>
     </div>
   );
