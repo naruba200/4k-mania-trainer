@@ -408,6 +408,16 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     // --- metronome: steady click at the effective BPM ---
     if (settings.metronome) {
       const sig = SIGNATURES[settings.signature] ?? 4;
+      // After a long hitch (e.g. tab jank), skip beats instead of
+      // machine-gunning dozens of catch-up clicks at once.
+      const maxBehind = msPerBeatRef.current * 4;
+      if (nextBeatRef.current < currentTime - maxBehind) {
+        const skip = Math.floor(
+          (currentTime - nextBeatRef.current) / msPerBeatRef.current
+        );
+        nextBeatRef.current += skip * msPerBeatRef.current;
+        beatCountRef.current += skip;
+      }
       while (nextBeatRef.current <= currentTime) {
         const b = nextBeatRef.current;
         if (b >= 0) {
@@ -519,8 +529,13 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     }
 
     // --- game over / section loop ---
+    // Loop only repeats when an actual section is defined — otherwise a stray
+    // checked "Loop" box would repeat the full chart forever.
+    if (gameOverRef.current) return;
     if (currentTime >= durationRef.current * 1000) {
-      if (settings.loopSection && !failedRef.current) {
+      const hasSection =
+        settings.sectionStart != null || settings.sectionEnd != null;
+      if (settings.loopSection && hasSection && !failedRef.current) {
         loopsRef.current++;
         resetRunState(true); // keep accumulated stats, fresh notes
         return;

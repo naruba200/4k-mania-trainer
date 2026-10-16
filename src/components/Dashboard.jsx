@@ -72,6 +72,8 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
   const [streak] = useState(() => getStreak());
   const [recentDays] = useState(() => getRecentDays(14));
   const [showEditor, setShowEditor] = useState(false);
+  const [chartTab, setChartTab] = useState(false);
+  const [notice, setNotice] = useState('');
   const [presetName, setPresetName] = useState('');
   const [goalPattern, setGoalPattern] = useState(PATTERN_TYPES.STREAM);
   const [goalAcc, setGoalAcc] = useState(95);
@@ -80,21 +82,30 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setSettings((prev) => ({
-      ...prev,
-      [name]:
-        type === 'checkbox'
-          ? checked
-          : name === 'holdChance'
-            ? parseFloat(value) / 100
-            : name === 'sectionStart' || name === 'sectionEnd'
-              ? value === ''
-                ? null
-                : parseFloat(value)
-              : NUMERIC_FIELDS.includes(name)
-                ? parseFloat(value)
-                : value,
-    }));
+    setSettings((prev) => {
+      let next;
+      if (type === 'checkbox') {
+        next = checked;
+      } else if (name === 'holdChance') {
+        const n = parseFloat(value) / 100;
+        // Clearing the field yields NaN — keep the previous value instead of
+        // poisoning the run (NaN duration = game never ends).
+        next = Number.isFinite(n) ? n : prev[name];
+      } else if (name === 'sectionStart' || name === 'sectionEnd') {
+        if (value === '') {
+          next = null;
+        } else {
+          const n = parseFloat(value);
+          next = Number.isFinite(n) ? n : prev[name];
+        }
+      } else if (NUMERIC_FIELDS.includes(name)) {
+        const n = parseFloat(value);
+        next = Number.isFinite(n) ? n : prev[name];
+      } else {
+        next = value;
+      }
+      return { ...prev, [name]: next };
+    });
   };
 
   const handleKeyBindsChange = (index, value) => {
@@ -136,8 +147,26 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
   };
 
   const handleStart = () => {
-    saveSettings(stripTransient(settings));
-    onStartGame(settings);
+    const safe = {
+      ...settings,
+      duration: Math.max(5, Number.isFinite(settings.duration) ? settings.duration : 30),
+      noteCount: Math.max(1, Math.round(Number.isFinite(settings.noteCount) ? settings.noteCount : 100)),
+      bpm: Math.min(300, Math.max(60, Number.isFinite(settings.bpm) ? settings.bpm : 140)),
+    };
+    if (chartTab) {
+      if (charts.length === 0) {
+        setNotice('No custom charts yet — open the editor to make one.');
+        return;
+      }
+      if (!charts.some((c) => c.id === safe.chartId)) {
+        safe.chartId = charts[0].id; // auto-select the first chart
+        setSettings((p) => ({ ...p, chartId: charts[0].id }));
+      }
+    }
+    setNotice('');
+    const out = { ...safe, chartId: chartTab ? safe.chartId : null };
+    saveSettings(stripTransient(out));
+    onStartGame(out);
   };
 
   const handleShare = async () => {
@@ -188,6 +217,7 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
     const list = getCharts();
     setCharts(list);
     setShowEditor(false);
+    setChartTab(true);
     const s = { ...stripTransient(settings), chartId: chart.id };
     saveSettings(s);
     onStartGame({ ...s, bgMusicUrl: settings.bgMusicUrl });
@@ -200,8 +230,8 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
     }
   };
 
-  const pb = settings.chartId ? null : getPB(configKey(settings));
-  const usingChart = !!settings.chartId;
+  const pb = chartTab ? null : getPB(configKey(settings));
+  const usingChart = chartTab;
   const activeChart = charts.find((c) => c.id === settings.chartId);
 
   const selectCls = 'w-full p-2 bg-gray-800 rounded text-white';
@@ -229,16 +259,21 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
         <div className="flex space-x-2">
           <button
             className={`source-tab ${!usingChart ? 'active' : ''}`}
-            onClick={() => setSettings((p) => ({ ...p, chartId: null }))}
+            onClick={() => {
+              setChartTab(false);
+              setSettings((p) => ({ ...p, chartId: null }));
+            }}
           >
             Pattern generator
           </button>
           <button
             className={`source-tab ${usingChart ? 'active' : ''}`}
-            onClick={() =>
-              charts[0] &&
-              setSettings((p) => ({ ...p, chartId: charts[0].id }))
-            }
+            onClick={() => {
+              setChartTab(true);
+              if (charts[0] && !settings.chartId) {
+                setSettings((p) => ({ ...p, chartId: charts[0].id }));
+              }
+            }}
           >
             Custom chart
           </button>
@@ -249,9 +284,17 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
         {usingChart && (
           <div className="mt-2 space-y-2">
             {charts.length === 0 && (
-              <p className="text-sm text-gray-400">
-                No custom charts yet — open the editor to make one.
-              </p>
+              <div className="chart-empty">
+                <p className="text-sm text-gray-400">
+                  No custom charts yet — make one in the editor.
+                </p>
+                <button
+                  className="small-btn mt-2"
+                  onClick={() => setShowEditor(true)}
+                >
+                  Open editor
+                </button>
+              </div>
             )}
             {charts.map((c) => (
               <div key={c.id} className="chart-row">
@@ -716,6 +759,7 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
         <span>Start Practice</span>
         <ArrowRight size={20} />
       </button>
+      {notice && <div className="dashboard-notice">{notice}</div>}
 
       <button onClick={handleShare} className="share-btn">
         <Link2 size={16} /> {shared ? 'Link copied!' : 'Copy share link'}

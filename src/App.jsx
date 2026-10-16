@@ -36,10 +36,12 @@ const App = () => {
   const [pbDelta, setPbDelta] = useState(0);
   const [newAchievements, setNewAchievements] = useState([]);
   const [replay, setReplay] = useState(null);
+  const [runId, setRunId] = useState(0);
   const [sharedSettings] = useState(parseSharedSettings);
 
   const handleStartGame = (gameSettings) => {
     setSettings(gameSettings);
+    setRunId((id) => id + 1);
     setResults(null);
     setReplay(null);
     setScreen('playing');
@@ -77,7 +79,7 @@ const App = () => {
         accuracy: gameResults.accuracy,
         maxCombo: gameResults.maxCombo,
         date: Date.now(),
-      });
+      }).isNewBest;
     }
 
     logRun({
@@ -98,6 +100,7 @@ const App = () => {
   };
 
   const handleRetry = () => {
+    setRunId((id) => id + 1);
     setResults(null);
     setReplay(null);
     setScreen('playing');
@@ -129,7 +132,7 @@ const App = () => {
         {screen === 'playing' && settings && (
           <div className="track-stage">
             <Playfield
-              key={JSON.stringify(settings)}
+              key={`${runId}-${JSON.stringify(settings)}`}
               settings={settings}
               onGameEnd={handleGameEnd}
               onRestart={handleRetry}

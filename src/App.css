@@ -868,3 +868,20 @@
   padding: 0.25rem 0.9rem;
   border-radius: 9999px;
 }
+
+.dashboard-notice {
+  background: #2a1a1a;
+  border: 1px solid #ff9f43;
+  color: #ff9f43;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  text-align: center;
+}
+.chart-empty {
+  background: #14141f;
+  border: 1px dashed #3a3a5e;
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+}
