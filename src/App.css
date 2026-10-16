@@ -39,6 +39,9 @@
   position: relative;
   overflow: hidden;
   background: #0a0a12;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .footer {
@@ -47,6 +50,221 @@
   text-align: center;
   font-size: 0.8rem;
   color: #aaa;
+}
+
+/* Pause overlay */
+.pause-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(26, 26, 46, 0.8);
+  border: 1px solid #3a3a5e;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+}
+.pause-btn:hover {
+  background: #2a2a4e;
+}
+
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 18, 0.88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  color: #fff;
+}
+.pause-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 220px;
+}
+.pause-buttons button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5e;
+  color: #fff;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.pause-buttons button:hover {
+  background: #2a2a4e;
+}
+.key-hint {
+  opacity: 0.55;
+  font-size: 0.8rem;
+  margin-left: auto;
+}
+
+/* Results screen */
+.results-screen {
+  flex: 1;
+  overflow-y: auto;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 1rem;
+  gap: 1.25rem;
+  background: #0a0a12;
+}
+.new-best-badge {
+  background: linear-gradient(135deg, #ffd166, #ff9f43);
+  color: #0a0a12;
+  font-weight: 800;
+  padding: 0.4rem 1.2rem;
+  border-radius: 9999px;
+  font-size: 0.95rem;
+}
+/* PB + history panels on the dashboard */
+.pb-panel {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 209, 102, 0.12);
+  border: 1px solid rgba(255, 209, 102, 0.4);
+  color: #ffd166;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+.history-panel {
+  background: #14141f;
+  border: 1px solid #2a2a4e;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+}
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.history-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: #ccc;
+}
+.history-row .history-score {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.history-row .history-acc {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.results-config {
+  color: #aaa;
+  font-size: 0.9rem;
+}
+.results-stats {
+  display: flex;
+  gap: 2.5rem;
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.stat-label {
+  color: #aaa;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.stat-value {
+  font-size: 1.75rem;
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+}
+.results-judgements {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: #14141f;
+  border: 1px solid #2a2a4e;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+}
+.judgement-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.judgement-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+}
+.judgement-name {
+  flex: 1;
+}
+.judgement-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.results-timing {
+  width: 100%;
+  max-width: 320px;
+  background: #14141f;
+  border: 1px solid #2a2a4e;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+}
+.results-timing h3 {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.timing-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 1rem;
+  font-size: 0.95rem;
+}
+.timing-grid span:nth-child(even) {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.results-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+.results-actions button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #4ecdc4;
+  border: none;
+  color: #0a0a12;
+  font-weight: 600;
+  padding: 0.6rem 1.4rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.results-actions button:last-child {
+  background: #1a1a2e;
+  color: #fff;
+  border: 1px solid #3a3a5e;
+}
+.results-actions button:hover {
+  filter: brightness(1.1);
 }
 
 /* Responsive adjustments */

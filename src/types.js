@@ -4,6 +4,8 @@ export const PATTERN_TYPES = {
   JUMPS: 'jumps',
   CHORDS: 'chords',
   SPEED: 'speed',
+  TRILL: 'trill',
+  STAIRCASE: 'staircase',
 };
 
 export const JUDGEMENTS = {
@@ -33,4 +35,9 @@ export const DEFAULT_SETTINGS = {
   keyBinds: [...DEFAULT_KEY_BINDS],
   patternType: PATTERN_TYPES.STREAM,
   speedIncrement: 5,
+  seed: Math.floor(Math.random() * 100000),
+  density: 1,
+  jackLength: 4,
+  holdChance: 0,
+  metronome: true,
 };

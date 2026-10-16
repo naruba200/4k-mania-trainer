@@ -1,20 +1,45 @@
 import { useRef, useEffect, useCallback } from 'react';
 
 export const useKeyboardListener = (keyBinds) => {
-  const keyStates = useRef(new Map().set('d', false).set('f', false).set('j', false).set('k', false)).current;
-  const onKeyDown = useCallback((e) => {
-    const normalizedKey = keyBinds.includes(e.key) ? e.key : null;
-    if (normalizedKey && !keyStates.get(normalizedKey)) {
-      keyStates.set(normalizedKey, true);
-    }
-  }, [keyBinds]);
+  const bindsRef = useRef([]);
+  const keyStates = useRef(new Map());
+  const pressQueueRef = useRef([]);
 
-  const onKeyUp = useCallback((e) => {
-    const normalizedKey = keyBinds.includes(e.key) ? e.key : null;
-    if (normalizedKey) {
-      keyStates.set(normalizedKey, false);
+  // Keep the normalized binds fresh without writing refs during render.
+  useEffect(() => {
+    bindsRef.current = keyBinds.map((k) => (k || '').toLowerCase());
+  });
+
+  // Programmatic press/release — shared by keyboard events and touch input.
+  const pressKey = useCallback((rawKey) => {
+    const key = (rawKey || '').toLowerCase();
+    if (!bindsRef.current.includes(key)) return;
+    if (!keyStates.current.get(key)) {
+      keyStates.current.set(key, true);
+      pressQueueRef.current.push({ key, time: Date.now() });
     }
-  }, [keyBinds]);
+  }, []);
+
+  const releaseKey = useCallback((rawKey) => {
+    const key = (rawKey || '').toLowerCase();
+    if (!bindsRef.current.includes(key)) return;
+    keyStates.current.set(key, false);
+  }, []);
+
+  const onKeyDown = useCallback(
+    (e) => {
+      if (e.repeat) return;
+      pressKey(e.key);
+    },
+    [pressKey]
+  );
+
+  const onKeyUp = useCallback(
+    (e) => {
+      releaseKey(e.key);
+    },
+    [releaseKey]
+  );
 
   useEffect(() => {
     window.addEventListener('keydown', onKeyDown);
@@ -25,11 +50,17 @@ export const useKeyboardListener = (keyBinds) => {
     };
   }, [onKeyDown, onKeyUp]);
 
-  const isKeyPressed = (key) => {
-    const normalizedKey = keyBinds.includes(key) ? key : null;
-    if (!normalizedKey) return false;
-    return keyStates.get(normalizedKey) || false;
-  };
+  const isKeyPressed = useCallback((key) => {
+    return keyStates.current.get((key || '').toLowerCase()) || false;
+  }, []);
 
-  return { isKeyPressed, keyStates };
+  // Drain queued keydown events. Each entry: { key, time } with a
+  // Date.now() timestamp in the same clock as the game start time.
+  const consumePresses = useCallback(() => {
+    const presses = pressQueueRef.current;
+    pressQueueRef.current = [];
+    return presses;
+  }, []);
+
+  return { isKeyPressed, consumePresses, pressKey, releaseKey };
 };
