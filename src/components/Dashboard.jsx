@@ -99,14 +99,27 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
   const [notice, setNotice] = useState('');
   const [shared, setShared] = useState(false);
 
-  const numOr = (v, d) => (Number.isFinite(v) ? v : d);
+  // Number-or-default that also coerces numeric strings (sliders and
+  // share links can hand us "12.5" instead of 12.5).
+  const numOr = (v, d) => {
+    const n = typeof v === 'string' ? parseFloat(v) : v;
+    return Number.isFinite(n) ? n : d;
+  };
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setSettings((prev) => {
       if (type === 'checkbox') return { ...prev, [name]: checked };
-      if (name === 'holdChance')
-        return { ...prev, holdChance: parseFloat(value) / 100 };
+      if (name === 'holdChance') {
+        const n = parseFloat(value) / 100;
+        return { ...prev, holdChance: Number.isFinite(n) ? n : prev[name] };
+      }
+      if (type === 'range') {
+        // Range inputs report strings — store real numbers or the slider
+        // snaps back to its fallback on every drag.
+        const n = parseFloat(value);
+        return { ...prev, [name]: Number.isFinite(n) ? n : prev[name] };
+      }
       return { ...prev, [name]: value };
     });
   };
