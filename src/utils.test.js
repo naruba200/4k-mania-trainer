@@ -1,5 +1,6 @@
 import {
   calculateHitJudgement,
+  calculateAccuracy,
   generatePattern,
   gradeForAccuracy,
   effectiveDuration,
@@ -108,13 +109,40 @@ describe('generatePattern', () => {
 });
 
 describe('gradeForAccuracy', () => {
-  test('thresholds', () => {
+  test('thresholds (osu!mania style)', () => {
     expect(gradeForAccuracy(100).name).toBe('SS');
-    expect(gradeForAccuracy(98.5).name).toBe('S');
-    expect(gradeForAccuracy(95).name).toBe('A');
-    expect(gradeForAccuracy(91).name).toBe('B');
-    expect(gradeForAccuracy(85).name).toBe('C');
+    expect(gradeForAccuracy(97).name).toBe('S');
+    expect(gradeForAccuracy(92).name).toBe('A');
+    expect(gradeForAccuracy(85).name).toBe('B');
+    expect(gradeForAccuracy(75).name).toBe('C');
     expect(gradeForAccuracy(40).name).toBe('D');
+  });
+});
+
+describe('calculateAccuracy', () => {
+  test('weights every judgement like osu!mania', () => {
+    // All marvelous = 100%
+    expect(calculateAccuracy({ MARVELOUS: 10 })).toBe(100);
+    // All misses = 0%
+    expect(calculateAccuracy({ MISS: 10 })).toBe(0);
+    // Half marvelous, half greats: (5*300 + 5*100) / (10*300) = 66.67%
+    expect(calculateAccuracy({ MARVELOUS: 5, GREAT: 5 })).toBeCloseTo(
+      66.67,
+      1
+    );
+    // Mixed bag stays smooth, never cliff-dives
+    const acc = calculateAccuracy({
+      MARVELOUS: 80,
+      PERFECT: 10,
+      GREAT: 5,
+      GOOD: 3,
+      BAD: 1,
+      MISS: 1,
+    });
+    expect(acc).toBeGreaterThan(85);
+    expect(acc).toBeLessThan(100);
+    // Empty = fresh run shows 100%
+    expect(calculateAccuracy({})).toBe(100);
   });
 });
 

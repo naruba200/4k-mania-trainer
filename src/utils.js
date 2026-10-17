@@ -376,12 +376,19 @@ export const calculateScore = (judgements) => {
   );
 };
 
+// Accuracy, osu!mania / DJMAX style: every judgement contributes its point
+// value, weighted against a perfect run. A GREAT is worth 1/3 of a
+// MARVELOUS, not zero — so the number moves smoothly instead of
+// cliff-diving on the first non-perfect hit.
 export const calculateAccuracy = (judgements) => {
   const total = Object.values(judgements).reduce((a, b) => a + b, 0);
-  if (total === 0) return 0;
+  if (total === 0) return 100;
 
-  const clean = (judgements.MARVELOUS || 0) + (judgements.PERFECT || 0);
-  return (clean / total) * 100;
+  const points = Object.entries(judgements).reduce(
+    (sum, [j, n]) => sum + (JUDGEMENTS[j]?.points || 0) * n,
+    0
+  );
+  return (points / (total * JUDGEMENTS.MARVELOUS.points)) * 100;
 };
 
 // Timing stats from signed hit errors (ms; negative = early, positive = late).
@@ -457,9 +464,6 @@ export const simulateNotes = (notes, settings, skill = 'normal') => {
     }
   }
 
-  const acc =
-    judged > 0
-      ? ((jud.MARVELOUS || 0) + (jud.PERFECT || 0)) / judged * 100
-      : 0;
+  const acc = calculateAccuracy(jud);
   return { score, accuracy: acc, maxCombo, total: judged, judgements: jud };
 };

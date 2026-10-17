@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import {
   calculateHitJudgement,
   generatePattern,
+  calculateAccuracy,
   judgementColor,
   MAX_HIT_WINDOW,
 } from '../utils';
@@ -96,8 +97,7 @@ const ReplayViewer = ({ replay, onClose }) => {
     }
     events.sort((a, b) => a.t - b.t);
     const total = events.length;
-    const acc =
-      total > 0 ? ((jud.MARVELOUS || 0) + (jud.PERFECT || 0)) / total * 100 : 0;
+    const acc = calculateAccuracy(jud);
     const lastT = events.length ? events[events.length - 1].t : 0;
     return { missing: false, st, events, score, acc, total, jud, lastT };
   }, [replay]);
