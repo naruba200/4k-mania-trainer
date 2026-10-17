@@ -61,32 +61,6 @@ export const deleteChart = (id) =>
     getCharts().filter((c) => c.id !== id)
   );
 
-// ---- Setting presets ----
-export const getPresets = () => safeGet('mania.presets', []);
-export const savePreset = (preset) => {
-  const presets = getPresets().filter((p) => p.name !== preset.name);
-  presets.unshift(preset);
-  safeSet('mania.presets', presets.slice(0, 30));
-};
-export const deletePreset = (name) =>
-  safeSet(
-    'mania.presets',
-    getPresets().filter((p) => p.name !== name)
-  );
-
-// ---- Goals ----
-export const getGoals = () => safeGet('mania.goals', []);
-export const saveGoal = (goal) => {
-  const goals = getGoals().filter((g) => g.id !== goal.id);
-  goals.unshift(goal);
-  safeSet('mania.goals', goals.slice(0, 20));
-};
-export const deleteGoal = (id) =>
-  safeSet(
-    'mania.goals',
-    getGoals().filter((g) => g.id !== id)
-  );
-
 // ---- Achievements ----
 export const getAchievements = () => safeGet('mania.achievements', {});
 export const unlockAchievement = (id) => {
@@ -106,10 +80,9 @@ export const ACHIEVEMENT_DEFS = [
   { id: 'score-50k', name: '50K Club', desc: 'Score 50,000 in one run' },
   { id: 'score-100k', name: '100K Club', desc: 'Score 100,000 in one run' },
   { id: 'runs-10', name: 'Grinder', desc: 'Complete 10 runs' },
-  { id: 'streak-7', name: 'Week Warrior', desc: 'Practice 7 days in a row' },
 ];
 
-// ---- Streaks (set of YYYY-MM-DD strings with at least one run) ----
+// ---- Play-day history (powers the 14-day heatmap) ----
 export const recordPlayDate = () => {
   const days = safeGet('mania.days', []);
   const today = new Date().toISOString().slice(0, 10);
@@ -117,19 +90,6 @@ export const recordPlayDate = () => {
     days.unshift(today);
     safeSet('mania.days', days.slice(0, 90));
   }
-};
-
-export const getStreak = () => {
-  const days = new Set(safeGet('mania.days', []));
-  let streak = 0;
-  const d = new Date();
-  // Allow today-or-yesterday as the streak head.
-  if (!days.has(d.toISOString().slice(0, 10))) d.setDate(d.getDate() - 1);
-  while (days.has(d.toISOString().slice(0, 10))) {
-    streak++;
-    d.setDate(d.getDate() - 1);
-  }
-  return streak;
 };
 
 export const getRecentDays = (n = 14) => {

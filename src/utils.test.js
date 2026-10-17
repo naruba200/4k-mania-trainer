@@ -27,13 +27,18 @@ const base = {
 };
 
 describe('calculateHitJudgement', () => {
-  test('respects judgement windows', () => {
-    expect(calculateHitJudgement(5)).toBe('MARVELOUS');
-    expect(calculateHitJudgement(12)).toBe('PERFECT');
-    expect(calculateHitJudgement(24)).toBe('GREAT');
-    expect(calculateHitJudgement(40)).toBe('GOOD');
-    expect(calculateHitJudgement(60)).toBe('BAD');
-    expect(calculateHitJudgement(65)).toBe('MISS');
+  test('respects judgement windows (Judge 4: 22/45/90/135/180)', () => {
+    expect(calculateHitJudgement(10)).toBe('MARVELOUS');
+    expect(calculateHitJudgement(30)).toBe('PERFECT');
+    expect(calculateHitJudgement(70)).toBe('GREAT');
+    expect(calculateHitJudgement(120)).toBe('GOOD');
+    expect(calculateHitJudgement(170)).toBe('BAD');
+    expect(calculateHitJudgement(200)).toBe('MISS');
+    // boundary checks
+    expect(calculateHitJudgement(22)).toBe('MARVELOUS');
+    expect(calculateHitJudgement(23)).toBe('PERFECT');
+    expect(calculateHitJudgement(180)).toBe('BAD');
+    expect(calculateHitJudgement(181)).toBe('MISS');
     expect(calculateHitJudgement(MAX_HIT_WINDOW + 1)).toBe('MISS');
   });
 });
@@ -44,6 +49,31 @@ describe('generatePattern', () => {
     const b = generatePattern(base);
     expect(a).toEqual(b);
     expect(a.length).toBeGreaterThan(0);
+  });
+
+  test('never stacks overlapping holds in one lane', () => {
+    for (const patternType of ['streams', 'jacks', 'chords', 'holdstamina']) {
+      const notes = generatePattern({
+        ...base,
+        patternType,
+        holdChance: 0.5,
+        seed: 7,
+      });
+      const flat = [];
+      for (const n of notes) {
+        const cols = Array.isArray(n.column) ? n.column : [n.column];
+        for (const c of cols)
+          flat.push({ time: n.time, column: c, hold: n.hold });
+      }
+      flat.sort((a, b) => a.time - b.time);
+      const laneEnd = [0, 0, 0, 0];
+      for (const n of flat) {
+        if (n.hold) {
+          expect(n.time).toBeGreaterThanOrEqual(laneEnd[n.column]);
+          laneEnd[n.column] = n.time + n.hold;
+        }
+      }
+    }
   });
 
   test('all pattern types produce valid columns', () => {
@@ -93,18 +123,8 @@ describe('generatePattern', () => {
     expect(mid.length).toBeGreaterThan(0);
   });
 
-  test('section trims and shifts notes', () => {
-    const notes = generatePattern({
-      ...base,
-      sectionStart: 5,
-      sectionEnd: 10,
-    });
-    expect(notes.length).toBeGreaterThan(0);
-    for (const n of notes) {
-      expect(n.time).toBeGreaterThanOrEqual(0);
-      expect(n.time).toBeLessThan(5000);
-    }
-    expect(effectiveDuration({ ...base, sectionStart: 5, sectionEnd: 10 })).toBe(5);
+  test('effectiveDuration returns the full run length', () => {
+    expect(effectiveDuration({ ...base })).toBe(base.duration);
   });
 });
 

@@ -6,7 +6,6 @@ import {
   generatePattern,
   calculateAccuracy,
   calculateTimingStats,
-  effectiveBpm,
   effectiveDuration,
   gradeForAccuracy,
   judgementColor,
@@ -14,7 +13,7 @@ import {
   simulateNotes,
   MAX_HIT_WINDOW,
 } from '../utils';
-import { JUDGEMENTS, SIGNATURES } from '../types';
+import { JUDGEMENTS } from '../types';
 import { getCharts } from '../storage';
 import { Pause, Play, RotateCcw, Home } from 'lucide-react';
 
@@ -67,15 +66,10 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
   const pauseStartedAtRef = useRef(0);
   const touchMapRef = useRef(new Map());
   const replayRef = useRef(null);
-  const bgmRef = useRef(null);
   const [paused, setPaused] = useState(false);
 
-  // Metronome state
+  // Shared WebAudio context (hitsounds).
   const audioRef = useRef(null);
-  const nextBeatRef = useRef(0);
-  const beatCountRef = useRef(0);
-  const msPerBeatRef = useRef(500);
-  const lastBeatWallRef = useRef(0);
 
   const settingsRef = useRef(settings);
   const onGameEndRef = useRef(onGameEnd);
@@ -89,11 +83,6 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
   const setPausedState = useCallback((p) => {
     pausedRef.current = p;
     setPaused(p);
-    const bgm = bgmRef.current;
-    if (bgm) {
-      if (p) bgm.pause();
-      else bgm.play().catch(() => {});
-    }
   }, []);
 
   const togglePause = useCallback(() => {
@@ -238,10 +227,6 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     lastJudgementRef.current = null;
     ringsRef.current = [];
     gameOverRef.current = false;
-    nextBeatRef.current = 0;
-    beatCountRef.current = 0;
-    msPerBeatRef.current = 60000 / effectiveBpm(st);
-    lastBeatWallRef.current = 0;
     // Countdown: the clock starts negative so notes roll in on "go".
     startTimeRef.current = Date.now() + COUNTDOWN_MS;
     setPausedState(false);
@@ -262,14 +247,6 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
           st.ghost
         ).score
       : null;
-    // Background music (session object URL, not persisted).
-    if (st.bgMusicUrl) {
-      const audio = new Audio(st.bgMusicUrl);
-      audio.loop = true;
-      audio.volume = 0.4;
-      bgmRef.current = audio;
-      audio.play().catch(() => {});
-    }
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -281,10 +258,6 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     window.addEventListener('resize', resizeCanvas);
     return () => {
       window.removeEventListener('resize', resizeCanvas);
-      if (bgmRef.current) {
-        bgmRef.current.pause();
-        bgmRef.current = null;
-      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, setPausedState]);
@@ -292,7 +265,6 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
   const finishRun = (failed) => {
     gameOverRef.current = true;
     failedRef.current = failed;
-    if (bgmRef.current) bgmRef.current.pause();
     const jud = judgementsRef.current;
     const total = Object.values(jud).reduce((a, b) => a + b, 0);
     const grade = gradeForAccuracy(accRef.current);
@@ -402,30 +374,6 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       }
     };
 
-    // --- metronome: steady click at the effective BPM ---
-    if (settings.metronome) {
-      const sig = SIGNATURES[settings.signature] ?? 4;
-      // After a long hitch (e.g. tab jank), skip beats instead of
-      // machine-gunning dozens of catch-up clicks at once.
-      const maxBehind = msPerBeatRef.current * 4;
-      if (nextBeatRef.current < currentTime - maxBehind) {
-        const skip = Math.floor(
-          (currentTime - nextBeatRef.current) / msPerBeatRef.current
-        );
-        nextBeatRef.current += skip * msPerBeatRef.current;
-        beatCountRef.current += skip;
-      }
-      while (nextBeatRef.current <= currentTime) {
-        const b = nextBeatRef.current;
-        if (b >= 0) {
-          click(beatCountRef.current % sig === 0);
-          lastBeatWallRef.current = wallNow;
-        }
-        nextBeatRef.current += msPerBeatRef.current;
-        beatCountRef.current += 1;
-      }
-    }
-
     // --- input: match each discrete keydown to the nearest unhit note ---
     for (const press of consumePresses()) {
       const pressTime = press.time - startTimeRef.current;
@@ -525,18 +473,9 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       }
     }
 
-    // --- game over / section loop ---
-    // Loop only repeats when an actual section is defined — otherwise a stray
-    // checked "Loop" box would repeat the full chart forever.
+    // --- game over ---
     if (gameOverRef.current) return;
     if (currentTime >= durationRef.current * 1000) {
-      const hasSection =
-        settings.sectionStart != null || settings.sectionEnd != null;
-      if (settings.loopSection && hasSection && !failedRef.current) {
-        loopsRef.current++;
-        resetRunState(true); // keep accumulated stats, fresh notes
-        return;
-      }
       finishRun(false);
       return;
     }
@@ -633,12 +572,9 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       }
     }
 
-    // Receptor line (pulses on the metronome beat)
-    const beatAge = wallNow - lastBeatWallRef.current;
-    const pulse =
-      settings.metronome && !reduceMotion && beatAge < 150 ? 1 - beatAge / 150 : 0;
-    ctx.strokeStyle = `rgba(140, 140, 220, ${0.45 + pulse * 0.55})`;
-    ctx.lineWidth = 2 + pulse * 3;
+    // Receptor line
+    ctx.strokeStyle = 'rgba(140, 140, 220, 0.45)';
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(0, receptorY);
     ctx.lineTo(width, receptorY);
@@ -736,10 +672,6 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
       ctx.textAlign = 'left';
     }
   }, [settings]);
-
-  const loopActive =
-    settings.loopSection &&
-    (settings.sectionStart != null || settings.sectionEnd != null);
 
   return (
     <div

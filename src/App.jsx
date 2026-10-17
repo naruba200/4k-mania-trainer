@@ -11,7 +11,6 @@ import {
   trySavePB,
   logRun,
   recordPlayDate,
-  getStreak,
   getHistory,
   unlockAchievement,
   ACHIEVEMENT_DEFS,
@@ -63,7 +62,6 @@ const App = () => {
       if (gameResults.accuracy >= 98) grant('acc-98');
       if (gameResults.score >= 50000) grant('score-50k');
       if (gameResults.score >= 100000) grant('score-100k');
-      if (getStreak() >= 7) grant('streak-7');
     }
     if (getHistory().length + 1 >= 10) grant('runs-10');
 

@@ -129,36 +129,16 @@ export const generatePattern = (settings) => {
       const off = i * segDur * 1000;
       out = out.concat(sub.map((n) => ({ ...n, time: n.time + off })));
     });
-    return applySection(out, settings);
+    return applySection(out);
   }
-  return applySection(genSegment(settings), settings);
+  return applySection(genSegment(settings));
 };
 
-// Keep only the selected section (seconds); shift it to start at 0.
-const applySection = (notes, settings) => {
-  const { sectionStart, sectionEnd } = settings;
-  if (sectionStart == null && sectionEnd == null) return notes;
-  const s = (sectionStart ?? 0) * 1000;
-  const e = (sectionEnd ?? settings.duration) * 1000;
-  return notes
-    .filter((n) => n.time >= s && n.time < e)
-    .map((n) => ({
-      ...n,
-      time: n.time - s,
-      hold: n.hold ? Math.min(n.hold, Math.max(0, e - n.time)) : n.hold,
-    }));
-};
+// Section practice was removed — charts always play in full.
+const applySection = (notes) => notes;
 
-// Run length after section trimming.
-export const effectiveDuration = (settings) => {
-  if (settings.sectionStart != null || settings.sectionEnd != null) {
-    return Math.max(
-      1,
-      (settings.sectionEnd ?? settings.duration) - (settings.sectionStart ?? 0)
-    );
-  }
-  return settings.duration;
-};
+// Run length in seconds.
+export const effectiveDuration = (settings) => settings.duration;
 
 const genSegment = (settings) => {
   const {
@@ -218,6 +198,8 @@ const genSegment = (settings) => {
   // Pattern state for the musical (non-robotic) variations below.
   // Everything runs off the seeded RNG, so a seed always replays the same chart.
   let prevCol = -1;
+  // Per-lane hold tail end times — prevents stacking holds in one lane.
+  const laneHoldEnd = [0, 0, 0, 0];
   let jackCol = Math.floor(rand() * 4);
   let jackPos = 0;
   let jackLen = 1 + Math.floor(rand() * Math.max(1, jackLength));
@@ -350,10 +332,21 @@ const genSegment = (settings) => {
     prevCol = Array.isArray(column) ? column[column.length - 1] : column;
 
     // Hold notes: 2 beats normally, 4 beats for hold stamina.
+    // Lane-aware placement: never start a hold in a lane that already has
+    // one active there — stacked holds in one lane are unplayable and used
+    // to break the tail logic at high holdChance.
     const hc = patternType === 'holdstamina' ? 0.6 : holdChance;
     const holdBeats = patternType === 'holdstamina' ? 4 : 2;
-    const hold =
-      hc > 0 && rand() < hc ? (60000 / bpmAt(i)) * holdBeats : null;
+    let hold = null;
+    if (hc > 0 && rand() < hc) {
+      const cols = Array.isArray(column) ? column : [column];
+      const dur = (60000 / bpmAt(i)) * holdBeats;
+      const blocked = cols.some((c) => laneHoldEnd[c] > time);
+      if (!blocked) {
+        hold = dur;
+        for (const c of cols) laneHoldEnd[c] = time + dur;
+      }
+    }
 
     notes.push({
       time,

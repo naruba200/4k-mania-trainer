@@ -885,3 +885,60 @@
   padding: 1rem;
   text-align: center;
 }
+
+/* Quick setup: essentials + play, compact and above the fold */
+.quick-setup {
+  background: #1a1a2e;
+  border: 1px solid #2e2e4e;
+  border-radius: 12px;
+  padding: 1rem;
+}
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+/* Additional settings: collapsed by default */
+.more-settings {
+  background: #141422;
+  border: 1px solid #2e2e4e;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+}
+.more-settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: 600;
+  color: #fff;
+  list-style: none;
+  user-select: none;
+}
+.more-settings-toggle::-webkit-details-marker {
+  display: none;
+}
+.more-settings[open] .more-settings-toggle svg {
+  transform: rotate(180deg);
+}
+.more-settings-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+/* Chart file import button */
+.import-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  background: #2e2e4e;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.import-btn:hover {
+  background: #3a3a5e;
+}
