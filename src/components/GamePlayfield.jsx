@@ -523,7 +523,7 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
               ? Math.max(0, 1 - (wallNow - note.tailAt) / 200)
               : 1;
           ctx.fillStyle = bodyColor;
-          ctx.fillRect(x - 18, top, h);
+          ctx.fillRect(x - 18, top, 36, h);
           ctx.globalAlpha = 1;
         }
       }
@@ -697,9 +697,8 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
             <button onClick={onRestart}>
               <RotateCcw size={16} /> Restart
             </button>
-            <button onClick={loopActive ? () => finishRun(false) : onQuit}>
-              <Home size={16} />{' '}
-              {loopActive ? 'Finish & results' : 'Quit to dashboard'}
+            <button onClick={onQuit}>
+              <Home size={16} /> Quit to dashboard
             </button>
           </div>
         </div>
