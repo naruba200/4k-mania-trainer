@@ -942,3 +942,184 @@
 .import-btn:hover {
   background: #3a3a5e;
 }
+
+/* ---- Custom number-input steppers (replaces the native grey spinner) ---- */
+.num-input-wrap {
+  display: inline-flex;
+  align-items: stretch;
+  vertical-align: middle;
+}
+.num-input-wrap:has(> input.w-full) {
+  display: flex;
+  width: 100%;
+}
+.num-input-wrap input {
+  min-width: 0;
+}
+.num-input-wrap input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.num-input-wrap input::-webkit-outer-spin-button,
+.num-input-wrap input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.num-stepper {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.num-stepper-btn {
+  flex: 1;
+  width: 22px;
+  min-height: 0;
+  padding: 0;
+  font-size: 7px;
+  line-height: 1;
+  color: #aaa;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5e;
+  border-left: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.num-stepper-btn:first-child {
+  border-radius: 0 8px 0 0;
+  border-bottom: none;
+}
+.num-stepper-btn:last-child {
+  border-radius: 0 0 8px 0;
+}
+.num-stepper-btn:hover {
+  background: #2a2a4e;
+  color: #fff;
+}
+
+/* ---- Drag-and-drop overlay + .osz difficulty picker ---- */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 18, 0.85);
+  border: 3px dashed #4ecdc4;
+  color: #4ecdc4;
+  font-size: 1.25rem;
+  font-weight: 700;
+  pointer-events: none;
+}
+.osz-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.osz-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5e;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  cursor: pointer;
+  color: #fff;
+  font-size: 0.9rem;
+}
+.osz-row .osz-count {
+  margin-left: auto;
+  color: #888;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* ---- Chart editor tools ---- */
+.editor-tools {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.editor-tools button {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5e;
+  color: #fff;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.editor-tools button:hover:not(:disabled) {
+  background: #2a2a4e;
+}
+.editor-tools button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.snap-group {
+  display: inline-flex;
+}
+.snap-btn {
+  background: #1a1a2e;
+  border: 1px solid #3a3a5e;
+  color: #fff;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.snap-btn:first-child {
+  border-radius: 8px 0 0 8px;
+}
+.snap-btn:last-child {
+  border-radius: 0 8px 8px 0;
+}
+.snap-btn.active {
+  background: #4ecdc4;
+  color: #0a0a12;
+  font-weight: 700;
+  border-color: #4ecdc4;
+}
+.editor-lane-clear {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.lane-clear-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0.15rem 0;
+}
+.lane-clear-btn:hover {
+  color: #ff6b6b;
+}
+.editor-cell.selected {
+  outline: 2px solid #4ecdc4;
+  outline-offset: -2px;
+}
+.editor-cell.hold-tail {
+  background: rgba(255, 209, 102, 0.45);
+}
+.editor-beat {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.editor-beat:hover {
+  color: #4ecdc4;
+}
+.editor-num-input {
+  width: 7rem;
+}

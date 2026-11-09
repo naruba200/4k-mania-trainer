@@ -52,7 +52,6 @@ export const DEFAULT_SETTINGS = {
   bpm: 140,
   rateMod: '1.0x',
   scrollSpeed: 1.0,
-  duration: 30,
   noteCount: 100,
   keyBinds: [...DEFAULT_KEY_BINDS],
   patternType: PATTERN_TYPES.STREAM,

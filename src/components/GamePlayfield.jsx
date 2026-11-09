@@ -6,7 +6,8 @@ import {
   generatePattern,
   calculateAccuracy,
   calculateTimingStats,
-  effectiveDuration,
+  lastNoteEndSeconds,
+  resumeStartTime,
   gradeForAccuracy,
   judgementColor,
   skinColors,
@@ -57,13 +58,13 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
   ]);
   const accTimelineRef = useRef([]);
   const startTimeRef = useRef(0);
-  const durationRef = useRef(30);
+  const durationRef = useRef(3);
   const gameOverRef = useRef(false);
   const lastJudgementRef = useRef(null);
   const ringsRef = useRef([]);
   const ghostRef = useRef(null);
   const pausedRef = useRef(false);
-  const pauseStartedAtRef = useRef(0);
+  const pauseTimeRef = useRef(0); // chart time frozen when pause began
   const touchMapRef = useRef(new Map());
   const replayRef = useRef(null);
   const [paused, setPaused] = useState(false);
@@ -88,12 +89,17 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
   const togglePause = useCallback(() => {
     if (gameOverRef.current) return;
     if (!pausedRef.current) {
-      pauseStartedAtRef.current = Date.now();
+      pauseTimeRef.current = Date.now() - startTimeRef.current;
       setPausedState(true);
     } else {
-      // Shift the music clock forward by the paused duration so the chart
-      // resumes exactly where it froze.
-      startTimeRef.current += Date.now() - pauseStartedAtRef.current;
+      // Resume with a fresh 3-2-1 countdown: after it ends the chart
+      // continues exactly where it froze. Pausing mid-countdown restarts
+      // a full countdown (see resumeStartTime).
+      startTimeRef.current = resumeStartTime(
+        Date.now(),
+        pauseTimeRef.current,
+        COUNTDOWN_MS
+      );
       consumePresses(); // discard presses made while paused
       consumeReleases();
       setPausedState(false);
@@ -154,9 +160,10 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
   };
 
   // Build note instances from settings (pattern, mixer, section, or chart).
+  // The run ends at the last note end (hold tail included) + 3s, for
+  // generated and custom charts alike.
   const buildNotes = (st) => {
     let raw;
-    let duration;
     if (st.chartId) {
       const chart = getCharts().find((c) => c.id === st.chartId);
       raw = (chart?.notes || []).map((n) => ({
@@ -165,12 +172,10 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
         hold: n.h || null,
         type: 'custom',
       }));
-      const maxT = raw.reduce((m, n) => Math.max(m, n.time + (n.hold || 0)), 0);
-      duration = maxT / 1000 + 2;
     } else {
       raw = generatePattern(st);
-      duration = effectiveDuration(st);
     }
+    const duration = lastNoteEndSeconds(raw);
     const instances = [];
     for (const note of raw) {
       const cols = Array.isArray(note.column) ? note.column : [note.column];
@@ -443,7 +448,12 @@ const Playfield = ({ settings, onGameEnd, onRestart, onQuit }) => {
     }
 
     // --- hold tails ---
+    // During a countdown (start or resume) no tail is judged: a key
+    // released while paused must not MISS before the chart has resumed.
+    // isKeyPressed is still live after the countdown, so an early release
+    // is caught on the first post-countdown frame instead.
     for (const note of notesRef.current) {
+      if (currentTime < 0) break;
       if (!note.tail || note.hit !== true || note.tailHit !== undefined)
         continue;
       const key = keys[note.column];

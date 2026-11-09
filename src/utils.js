@@ -111,23 +111,27 @@ export const calculateHitJudgement = (hitDelta) => {
 };
 
 export const generatePattern = (settings) => {
-  // Mixer: split the run across several pattern types.
+  // Mixer: split the run across several pattern types, by note count.
   if (settings.mixer && settings.mixer.length > 0) {
     const segs = settings.mixer;
-    const segDur = settings.duration / segs.length;
     const segCount = Math.ceil(settings.noteCount / segs.length);
     let out = [];
+    let offset = 0;
     segs.forEach((pt, i) => {
       const sub = genSegment({
         ...settings,
         mixer: [],
         patternType: pt,
         noteCount: segCount,
-        duration: segDur,
         seed: (settings.seed ?? 0) + i * 7919,
       });
-      const off = i * segDur * 1000;
-      out = out.concat(sub.map((n) => ({ ...n, time: n.time + off })));
+      out = out.concat(sub.map((n) => ({ ...n, time: n.time + offset })));
+      if (sub.length > 0) {
+        // Next segment starts one beat-gap after the previous segment's
+        // last note (no duration to split on any more).
+        const lastT = Math.max(...sub.map((n) => n.time + (n.hold || 0)));
+        offset += lastT + 60000 / effectiveBpm(settings) / (settings.density || 1);
+      }
     });
     return applySection(out);
   }
@@ -137,14 +141,28 @@ export const generatePattern = (settings) => {
 // Section practice was removed — charts always play in full.
 const applySection = (notes) => notes;
 
-// Run length in seconds.
-export const effectiveDuration = (settings) => settings.duration;
+// Run end, in seconds: last note end (hold tail included) + 3s.
+// Notes are { time (ms), hold (ms|null) }. Empty chart ends after 3s.
+export const lastNoteEndSeconds = (notes) => {
+  if (!notes || notes.length === 0) return 3;
+  const maxEnd = notes.reduce(
+    (m, n) => Math.max(m, (n.time || 0) + (n.hold || 0)),
+    0
+  );
+  return maxEnd / 1000 + 3;
+};
+
+// Pure resume-countdown helper (testable): given the wall-clock now and the
+// chart time frozen at pause, return the new startTime so that after the
+// 3s countdown the chart resumes exactly where it froze. Pausing during
+// the initial countdown restarts a full countdown.
+export const resumeStartTime = (now, pauseTime, countdownMs = 3000) =>
+  pauseTime < 0 ? now + countdownMs : now + countdownMs - pauseTime;
 
 const genSegment = (settings) => {
   const {
     patternType,
     noteCount,
-    duration,
     speedIncrement,
     density = 1,
     jackLength = 4,
@@ -155,7 +173,6 @@ const genSegment = (settings) => {
   // Rate mods actually change the effective BPM now.
   const baseBpm = effectiveBpm(settings);
   const notes = [];
-  const totalTime = duration * 1000;
 
   // BPM of note i — ramps from baseBpm up by speedIncrement across the run
   // for the speed pattern, stays flat otherwise.
@@ -217,11 +234,9 @@ const genSegment = (settings) => {
   let cjLen = 2 + Math.floor(rand() * 3);
   let anchorCol = Math.floor(rand() * 4);
 
-  // Generate notes based on pattern type
+  // Generate exactly noteCount note-events (a chord counts as one event).
   let time = 0;
   for (let i = 0; i < noteCount; i++) {
-    if (time > totalTime) break;
-
     let column;
     switch (patternType) {
       case 'streams': {

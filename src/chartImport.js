@@ -1,6 +1,7 @@
-// Community chart import: StepMania (.sm / .ssc) and osu!mania (.osu).
-// Both parsers target 4-key charts and return the app's chart shape:
-//   { name, notes: [{ time (ms), column (0-3), hold (ms|null) }] }
+// Community chart import: StepMania (.sm / .ssc), osu!mania (.osu) and
+// osu! beatmap sets (.osz — a zip of .osu files plus audio/images).
+// All parsers target 4-key charts and return the app's internal chart shape:
+//   { name, notes: [{ t (ms), c (0-3), h (hold ms|null) }] }
 // Anything the trainer can't represent (warps, mines, >4 keys) is skipped
 // rather than failing the whole import.
 
@@ -89,13 +90,13 @@ const parseSM = (text, fallbackName) => {
           const ch = row[c];
           const time = Math.round(beatToSec(beat) * 1000);
           if (ch === '1' || ch === '4') {
-            notes.push({ time, column: c, hold: null });
+            notes.push({ t: time, c, h: null });
           } else if (ch === '2') {
             holdHeads[c] = { beat, time };
           } else if (ch === '3' && holdHeads[c]) {
             const head = holdHeads[c];
             delete holdHeads[c];
-            notes.push({ time: head.time, column: c, hold: time - head.time });
+            notes.push({ t: head.time, c, h: time - head.time });
           }
           // 'M' (mine) and anything else: skipped.
         }
@@ -103,9 +104,9 @@ const parseSM = (text, fallbackName) => {
     });
     // Unclosed hold heads become taps.
     for (const [c, head] of Object.entries(holdHeads)) {
-      notes.push({ time: head.time, column: Number(c), hold: null });
+      notes.push({ t: head.time, c: Number(c), h: null });
     }
-    notes.sort((a, b) => a.time - b.time || a.column - b.column);
+    notes.sort((a, b) => a.t - b.t || a.c - b.c);
     if (notes.length > 0) return { name: title, notes };
   }
   return null;
@@ -113,22 +114,37 @@ const parseSM = (text, fallbackName) => {
 
 // ---------- osu!mania (.osu) ----------
 
+// Parses one .osu file. Returns null unless it is an osu!mania chart with
+// notes. Extra fields (mode, circleSize, title, version) let the .osz
+// picker filter to 4K difficulties; a missing CircleSize (old/loose files)
+// is reported as null and does not reject a single-file import.
 const parseOsu = (text, fallbackName) => {
   const lines = text.split('\n').map((l) => l.trim());
   let mode = null;
+  let circleSize = null;
   let title = fallbackName;
+  let version = '';
   let inObjects = false;
+  let inDifficulty = false;
+  let inMetadata = false;
   const notes = [];
-  const holdEnds = {}; // "col@time" -> endTime (dedup)
+  const holdEnds = {}; // "col@time" -> 1 (dedup)
 
   for (const line of lines) {
     if (line.startsWith('[')) {
       inObjects = line === '[HitObjects]';
+      inDifficulty = line === '[Difficulty]';
+      inMetadata = line === '[Metadata]';
       continue;
     }
     if (!inObjects) {
       if (line.startsWith('Mode:')) mode = parseInt(line.slice(5), 10);
-      else if (line.startsWith('Title:')) title = line.slice(6).trim() || fallbackName;
+      else if (inMetadata && line.startsWith('Title:'))
+        title = line.slice(6).trim() || fallbackName;
+      else if (inMetadata && line.startsWith('Version:'))
+        version = line.slice(8).trim();
+      else if (inDifficulty && line.startsWith('CircleSize:'))
+        circleSize = parseFloat(line.slice(11));
       continue;
     }
     if (!line) continue;
@@ -143,20 +159,69 @@ const parseOsu = (text, fallbackName) => {
       // Hold: end time is the first field of objectParams.
       const endTime = parseInt(String(p[5] || '').split(':')[0], 10);
       if (Number.isFinite(endTime) && endTime > time) {
-        notes.push({ time, column, hold: endTime - time });
+        notes.push({ t: time, c: column, h: endTime - time });
       } else {
-        notes.push({ time, column, hold: null });
+        notes.push({ t: time, c: column, h: null });
       }
     } else {
       const key = `${column}@${time}`;
       if (holdEnds[key]) continue;
       holdEnds[key] = 1;
-      notes.push({ time, column, hold: null });
+      notes.push({ t: time, c: column, h: null });
     }
   }
   if (mode !== 3 || notes.length === 0) return null;
-  notes.sort((a, b) => a.time - b.time || a.column - b.column);
-  return { name: title, notes };
+  notes.sort((a, b) => a.t - b.t || a.c - b.c);
+  return { name: title, title, version, mode, circleSize, notes };
+};
+
+// ---------- osu! beatmap set (.osz) ----------
+
+// Unzips a .osz (a zip) and returns one candidate per 4K mania difficulty:
+//   [{ name: "Title [Version]", title, version, notes, noteCount }]
+// Only .osu entries are read — audio, images and video are never touched.
+// Non-mania modes and non-4K CircleSize values are skipped. Returns [] when
+// nothing qualifies (or the file isn't a valid zip).
+export const parseOszFile = async (file) => {
+  let JSZip;
+  try {
+    ({ default: JSZip } = await import('jszip'));
+  } catch {
+    return [];
+  }
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(file);
+  } catch {
+    return [];
+  }
+  const candidates = [];
+  const entries = Object.values(zip.files || {}).filter(
+    (e) => !e.dir && /\.osu$/i.test(e.name)
+  );
+  for (const entry of entries) {
+    let text;
+    try {
+      text = await entry.async('string');
+    } catch {
+      continue;
+    }
+    const base = entry.name.split('/').pop().replace(/\.osu$/i, '');
+    const parsed = parseOsu(text, base);
+    if (!parsed) continue;
+    if (parsed.mode !== 3) continue;
+    if (parsed.circleSize !== 4) continue; // 4K only
+    candidates.push({
+      name: parsed.version
+        ? `${parsed.title} [${parsed.version}]`
+        : parsed.title,
+      title: parsed.title,
+      version: parsed.version,
+      notes: parsed.notes,
+      noteCount: parsed.notes.length,
+    });
+  }
+  return candidates;
 };
 
 // ---------- dispatcher ----------
@@ -173,4 +238,4 @@ export const parseChartFile = (filename, text) => {
   return null;
 };
 
-export const SUPPORTED_CHART_EXTENSIONS = '.sm,.ssc,.osu';
+export const SUPPORTED_CHART_EXTENSIONS = '.sm,.ssc,.osu,.osz';

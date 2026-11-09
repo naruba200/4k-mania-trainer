@@ -3,7 +3,8 @@ import {
   calculateAccuracy,
   generatePattern,
   gradeForAccuracy,
-  effectiveDuration,
+  lastNoteEndSeconds,
+  resumeStartTime,
   simulateScore,
   simulateNotes,
   MAX_HIT_WINDOW,
@@ -14,7 +15,6 @@ const base = {
   bpm: 150,
   patternType: 'streams',
   noteCount: 100,
-  duration: 30,
   speedIncrement: 5,
   rateMod: '1.0x',
   density: 1,
@@ -109,22 +109,49 @@ describe('generatePattern', () => {
     }
   });
 
-  test('mixer concatenates pattern segments', () => {
+  test('generates exactly noteCount events (no duration cutoff)', () => {
+    expect(generatePattern({ ...base, noteCount: 50 })).toHaveLength(50);
+    expect(generatePattern({ ...base, noteCount: 200 })).toHaveLength(200);
+    // A huge noteCount is not truncated by any duration.
+    expect(generatePattern({ ...base, noteCount: 500 })).toHaveLength(500);
+  });
+
+  test('mixer concatenates pattern segments by note count', () => {
     const mixed = generatePattern({
       ...base,
       mixer: ['streams', 'jacks'],
-      duration: 20,
       noteCount: 40,
     });
-    const single = generatePattern({ ...base, duration: 20, noteCount: 40 });
+    const single = generatePattern({ ...base, noteCount: 40 });
     expect(mixed.length).toBeGreaterThanOrEqual(single.length);
-    // second half starts after the first segment's duration
-    const mid = mixed.filter((n) => n.time >= 10000);
-    expect(mid.length).toBeGreaterThan(0);
+    // Second segment starts after the first segment's last note, not at
+    // a fixed duration offset: split the run in half by note index and
+    // check the second half is strictly later in time.
+    const firstHalf = mixed.slice(0, 20);
+    const secondHalf = mixed.slice(20);
+    const firstEnd = Math.max(...firstHalf.map((n) => n.time + (n.hold || 0)));
+    expect(Math.min(...secondHalf.map((n) => n.time))).toBeGreaterThan(firstEnd);
   });
 
-  test('effectiveDuration returns the full run length', () => {
-    expect(effectiveDuration({ ...base })).toBe(base.duration);
+  test('lastNoteEndSeconds is last note end + 3s', () => {
+    expect(lastNoteEndSeconds([])).toBe(3);
+    expect(lastNoteEndSeconds([{ time: 1000, hold: null }])).toBe(4);
+    // Hold tail counts: 2000 + 500 hold = 2500ms -> 5.5s.
+    expect(
+      lastNoteEndSeconds([
+        { time: 1000, hold: null },
+        { time: 2000, hold: 500 },
+      ])
+    ).toBe(5.5);
+  });
+
+  test('resumeStartTime restarts the 3s countdown from the frozen time', () => {
+    // Frozen at 5000ms, resume at wall 100000: countdown ends at 103000,
+    // when currentTime is back to 5000.
+    expect(resumeStartTime(100000, 5000)).toBe(103000 - 5000);
+    // Paused during the initial countdown: full countdown restart.
+    expect(resumeStartTime(100000, -1200)).toBe(103000);
+    expect(resumeStartTime(100000, 0)).toBe(103000);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Settings,
   Play,
@@ -8,10 +8,12 @@ import {
   History,
   Link2,
   Trash2,
+  Pencil,
   Flame,
   Award,
   ChevronDown,
   Upload,
+  X,
 } from 'lucide-react';
 import { PATTERN_TYPES, RATE_MODS, DEFAULT_SETTINGS, SKINS } from '../types';
 import {
@@ -28,65 +30,33 @@ import {
   computeRatings,
 } from '../storage';
 import { configKey } from '../utils';
-import { parseChartFile, SUPPORTED_CHART_EXTENSIONS } from '../chartImport';
+import {
+  parseChartFile,
+  parseOszFile,
+  SUPPORTED_CHART_EXTENSIONS,
+} from '../chartImport';
 import ChartEditor from './ChartEditor';
+import NumInput from './NumInput';
 
 const randomSeed = () => Math.floor(Math.random() * 100000);
 
-// Numeric input you can fully clear while editing. On blur (or Enter) an
-// empty or invalid value snaps back to the field's default instead of
-// poisoning the run with NaN.
-const NumInput = ({
-  name,
-  value,
-  defaultValue,
-  min,
-  max,
-  step,
-  onCommit,
-  className,
-}) => {
-  const [text, setText] = useState(null); // null = not editing
-  const shown = text ?? String(value ?? '');
-  const commit = () => {
-    if (text === null) return;
-    const n = parseFloat(text);
-    if (text.trim() === '' || !Number.isFinite(n)) {
-      onCommit(name, defaultValue);
-    } else {
-      let v = n;
-      if (min !== undefined) v = Math.max(min, v);
-      if (max !== undefined) v = Math.min(max, v);
-      onCommit(name, v);
-    }
-    setText(null);
-  };
-  return (
-    <input
-      type="number"
-      name={name}
-      min={min}
-      max={max}
-      step={step}
-      value={shown}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') e.target.blur();
-      }}
-      className={className}
-    />
-  );
+// Old saved settings / share links may still carry `duration` — it no
+// longer exists, so strip it instead of letting it linger in state.
+const stripDuration = (s) => {
+  if (!s) return s;
+  const { duration: _ignored, ...rest } = s;
+  return rest;
 };
 
 const Dashboard = ({ onStartGame, initialSettings }) => {
   const [settings, setSettings] = useState(() => {
-    const saved = loadSettings();
+    const saved = stripDuration(loadSettings());
+    const initial = stripDuration(initialSettings);
     return {
       ...DEFAULT_SETTINGS,
       ...saved,
-      ...(initialSettings || {}),
-      seed: initialSettings?.seed ?? saved?.seed ?? randomSeed(),
+      ...(initial || {}),
+      seed: initial?.seed ?? saved?.seed ?? randomSeed(),
     };
   });
   const [history] = useState(() => getHistory());
@@ -95,9 +65,14 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
   const [ratings] = useState(() => computeRatings());
   const [recentDays] = useState(() => getRecentDays(14));
   const [showEditor, setShowEditor] = useState(false);
+  const [editingChart, setEditingChart] = useState(null);
   const [chartTab, setChartTab] = useState(false);
   const [notice, setNotice] = useState('');
   const [shared, setShared] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [oszCandidates, setOszCandidates] = useState(null);
+  const [oszChecked, setOszChecked] = useState([]);
+  const [oszFileName, setOszFileName] = useState('');
 
   // Number-or-default that also coerces numeric strings (sliders and
   // share links can hand us "12.5" instead of 12.5).
@@ -152,13 +127,13 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
   const handleStart = () => {
     const safe = {
       ...settings,
-      duration: Math.min(600, Math.max(5, numOr(settings.duration, 30))),
       noteCount: Math.max(1, Math.round(numOr(settings.noteCount, 100))),
       bpm: Math.min(300, Math.max(60, numOr(settings.bpm, 140))),
       scrollSpeed: Math.min(25, Math.max(1, numOr(settings.scrollSpeed, 1))),
       density: Math.min(2, Math.max(0.5, numOr(settings.density, 1))),
       seed: Math.floor(numOr(settings.seed, randomSeed())),
     };
+    delete safe.duration;
     if (chartTab) {
       if (charts.length === 0) {
         setNotice('No custom charts yet — open the editor to make one.');
@@ -194,16 +169,22 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
     saveChart(chart);
     setCharts(getCharts());
     setShowEditor(false);
+    setEditingChart(null);
   };
   const handlePlayChart = (chart) => {
     saveChart(chart);
     const list = getCharts();
     setCharts(list);
     setShowEditor(false);
+    setEditingChart(null);
     setChartTab(true);
     const s = { ...settings, chartId: chart.id };
     saveSettings(s);
     onStartGame(s);
+  };
+  const handleEditChart = (chart) => {
+    setEditingChart(chart);
+    setShowEditor(true);
   };
   const handleDeleteChart = (id) => {
     deleteChart(id);
@@ -212,10 +193,24 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
       setSettings((prev) => ({ ...prev, chartId: null }));
     }
   };
-  const handleImportFile = async (e) => {
-    const f = e.target.files?.[0];
-    e.target.value = '';
+
+  // Import one dropped / picked file. .osz opens the difficulty picker;
+  // .osu / .sm / .ssc import directly as before.
+  const handleImportFiles = async (fileList) => {
+    const f = fileList?.[0];
     if (!f) return;
+    if (/\.osz$/i.test(f.name)) {
+      const candidates = await parseOszFile(f);
+      if (candidates.length === 0) {
+        setNotice(`Couldn't import ${f.name} — no 4-key chart found in it.`);
+        return;
+      }
+      setOszCandidates(candidates);
+      setOszChecked(candidates.map((_, i) => i));
+      setOszFileName(f.name);
+      setNotice('');
+      return;
+    }
     const text = await f.text();
     const parsed = parseChartFile(f.name, text);
     if (!parsed || parsed.notes.length === 0) {
@@ -232,6 +227,66 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
     setNotice(`Imported "${parsed.name}" (${parsed.notes.length} notes).`);
   };
 
+  const handleImportFile = async (e) => {
+    const files = e.target.files;
+    e.target.value = '';
+    await handleImportFiles(files);
+  };
+
+  const handleImportOsz = () => {
+    if (!oszCandidates) return;
+    const picked = oszChecked
+      .map((i) => oszCandidates[i])
+      .filter(Boolean);
+    if (picked.length === 0) {
+      setNotice('Tick at least one difficulty to import.');
+      return;
+    }
+    const stamp = Date.now();
+    for (let i = 0; i < picked.length; i++) {
+      saveChart({
+        id: `chart-${stamp}-${i}`,
+        name: picked[i].name,
+        notes: picked[i].notes,
+      });
+    }
+    setCharts(getCharts());
+    setNotice(
+      `Imported ${picked.length} chart${picked.length > 1 ? 's' : ''} from ${oszFileName}.`
+    );
+    setOszCandidates(null);
+    setOszChecked([]);
+  };
+
+  const toggleOszCandidate = (i) => {
+    setOszChecked((prev) =>
+      prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]
+    );
+  };
+
+  // Drag-and-drop anywhere on the dashboard. A counter (not a boolean
+  // toggle) so dragenter/dragleave on child elements don't flicker it.
+  const dragCount = useRef(0);
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    dragCount.current += 1;
+    setIsDragging(true);
+  };
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    dragCount.current = Math.max(0, dragCount.current - 1);
+    if (dragCount.current === 0) setIsDragging(false);
+  };
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    dragCount.current = 0;
+    setIsDragging(false);
+    await handleImportFiles(e.dataTransfer?.files);
+  };
+
   const pb = chartTab ? null : getPB(configKey(settings));
   const usingChart = chartTab;
   const activeChart = charts.find((c) => c.id === settings.chartId);
@@ -241,7 +296,18 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
   const numCls = 'w-20 p-2 bg-gray-800 rounded text-white';
 
   return (
-    <div className="dashboard p-4 space-y-4">
+    <div
+      className="dashboard p-4 space-y-4"
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="drop-overlay">
+          Drop .osz / .osu / .sm / .ssc here
+        </div>
+      )}
       <div className="dashboard-header flex items-center space-x-2">
         <Settings className="text-mania-2" size={24} />
         <h2 className="text-xl font-bold">Practice Settings</h2>
@@ -281,7 +347,7 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
             >
               Custom chart
             </button>
-            <button className="source-tab" onClick={() => setShowEditor(true)}>
+            <button className="source-tab" onClick={() => { setEditingChart(null); setShowEditor(true); }}>
               + Editor
             </button>
           </div>
@@ -295,7 +361,7 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
                   </p>
                   <button
                     className="small-btn mt-2"
-                    onClick={() => setShowEditor(true)}
+                    onClick={() => { setEditingChart(null); setShowEditor(true); }}
                   >
                     Open editor
                   </button>
@@ -313,6 +379,14 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
                   </button>
                   <button
                     className="icon-btn"
+                    onClick={() => handleEditChart(c)}
+                    aria-label="Edit chart"
+                    title="Edit chart"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                  <button
+                    className="icon-btn"
                     onClick={() => handleDeleteChart(c.id)}
                     aria-label="Delete chart"
                   >
@@ -321,7 +395,7 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
                 </div>
               ))}
               <label className="import-btn">
-                <Upload size={14} /> Import .sm / .ssc / .osu
+                <Upload size={14} /> Import .sm / .ssc / .osu / .osz
                 <input
                   type="file"
                   accept={SUPPORTED_CHART_EXTENSIONS}
@@ -329,6 +403,9 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
                   hidden
                 />
               </label>
+              <p className="text-sm text-gray-400">
+                Or drop a chart file anywhere on this page.
+              </p>
               {activeChart && (
                 <p className="text-sm text-gray-400">
                   Playing: {activeChart.name} ({activeChart.notes.length}{' '}
@@ -398,19 +475,6 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
                   {numOr(settings.density, 1)}x
                 </span>
               </div>
-            </div>
-
-            <div className="setting-group">
-              <label className={labelCls}>Duration (sec)</label>
-              <NumInput
-                name="duration"
-                value={settings.duration}
-                defaultValue={30}
-                min={5}
-                max={600}
-                onCommit={handleNumCommit}
-                className={selectCls}
-              />
             </div>
 
             <div className="setting-group">
@@ -783,10 +847,53 @@ const Dashboard = ({ onStartGame, initialSettings }) => {
 
       {showEditor && (
         <ChartEditor
+          initialChart={editingChart}
           onSave={handleSaveChart}
           onPlay={handlePlayChart}
-          onClose={() => setShowEditor(false)}
+          onClose={() => { setShowEditor(false); setEditingChart(null); }}
         />
+      )}
+
+      {oszCandidates && (
+        <div className="editor-overlay">
+          <div className="editor-panel">
+            <div className="editor-header">
+              <h2>Choose difficulties — {oszFileName}</h2>
+              <button
+                className="icon-btn"
+                onClick={() => setOszCandidates(null)}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-400">
+              Tick the difficulties to import. Each becomes its own chart
+              (music and images are ignored).
+            </p>
+            <div className="osz-list">
+              {oszCandidates.map((c, i) => (
+                <label key={c.name} className="osz-row">
+                  <input
+                    type="checkbox"
+                    checked={oszChecked.includes(i)}
+                    onChange={() => toggleOszCandidate(i)}
+                  />
+                  <span>{c.name}</span>
+                  <span className="osz-count">{c.noteCount} notes</span>
+                </label>
+              ))}
+            </div>
+            <div className="editor-actions">
+              <button type="button" onClick={handleImportOsz} className="primary">
+                <Upload size={16} /> Import selected
+              </button>
+              <button type="button" onClick={() => setOszCandidates(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
